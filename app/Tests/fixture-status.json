@@ -1,0 +1,87 @@
+{
+  "generated_at": "2026-07-31T09:00:00+09:00",
+  "account_count": 2,
+  "heartbeat": {
+    "status": "ok",
+    "next": "2026-07-31T09:05:00+09:00",
+    "accounts": 2,
+    "failed": 0
+  },
+  "headline": {
+    "account_id": 101,
+    "provider": "codex",
+    "kind": "5h",
+    "used_pct": 61.0,
+    "reset_at_epoch": 1785400000,
+    "severity": "warning"
+  },
+  "accounts": [
+    {
+      "id": 101,
+      "provider": "codex",
+      "email": "alpha@example.invalid",
+      "plan": "plus",
+      "status": "active",
+      "windows": [
+        {
+          "kind": "5h",
+          "used_pct": 61.0,
+          "reset_at_epoch": 1785400000,
+          "severity": "warning",
+          "is_active": true,
+          "source": "api"
+        }
+      ],
+      "state": {
+        "auth": "ok",
+        "subscription": "paid",
+        "quota": "warning",
+        "usable": true,
+        "binding_window": {
+          "kind": "5h",
+          "used_pct": 61.0,
+          "reset_at_epoch": 1785400000,
+          "severity": "warning",
+          "is_active": true,
+          "source": "api"
+        }
+      }
+    },
+    {
+      "id": 202,
+      "provider": "kimi",
+      "email": "beta@example.invalid",
+      "plan": "coding-plan",
+      "status": "active",
+      "windows": [
+        {
+          "kind": "weekly",
+          "used_pct": 12.5,
+          "label": "GLM-4.7",
+          "reset_at_epoch": 1785900000,
+          "source": "api"
+        }
+      ],
+      "state": {
+        "auth": "ok",
+        "subscription": "paid",
+        "quota": "ok",
+        "usable": true,
+        "binding_window": {
+          "kind": "weekly",
+          "label": "GLM-4.7",
+          "used_pct": 12.5,
+          "reset_at_epoch": 1785900000,
+          "source": "api"
+        }
+      }
+    }
+  ],
+  "last_swap": {
+    "provider": "codex",
+    "from": "alpha@example.invalid",
+    "to": "gamma@example.invalid",
+    "at": "2026-07-30T22:00:00+09:00",
+    "at_epoch": 1785358800
+  }
+}
