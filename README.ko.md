@@ -173,7 +173,7 @@ flowchart TD
 
 | 경로                 | 용도 |
 |----------------------|------|
-| `app/TokenStatusBar.swift` | 단일 파일 Swift 메뉴 막대 UI. |
+| `app/*.swift`        | `swiftc`로 직접 컴파일하는 다중 파일 Swift 메뉴 막대 UI. |
 | `build.sh`           | `TokenStatusBar.app` 컴파일 및 번들링. |
 | `backend/pool.py`    | CLI: 온보딩, 폴링, 상태 내보내기. |
 | `backend/poller.py`  | 제공자별 실시간 쿼터 폴링. |

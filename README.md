@@ -177,7 +177,7 @@ flowchart TD
 
 | Path                 | Purpose |
 |----------------------|---------|
-| `app/TokenStatusBar.swift` | Single-file Swift menu-bar UI. |
+| `app/*.swift`        | Multi-file Swift menu-bar UI compiled directly with `swiftc`. |
 | `build.sh`           | Compiles and bundles `TokenStatusBar.app`. |
 | `backend/pool.py`    | CLI: onboarding, polling, status export. |
 | `backend/poller.py`  | Per-provider real-time quota polling. |
