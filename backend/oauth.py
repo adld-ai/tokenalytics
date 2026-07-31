@@ -728,6 +728,30 @@ REFRESH_FUNCS = {
 PROVIDERS = list(LOGIN_FUNCS.keys()) + ["devin"]
 
 
+def resolve_login(provider):
+    """The login callable for a provider, legacy table first."""
+    legacy = LOGIN_FUNCS.get(provider)
+    if legacy:
+        return legacy
+    from providers import login_funcs
+    return login_funcs().get(provider)
+
+
+def resolve_refresh(provider):
+    """The refresh callable for a provider, legacy table first."""
+    legacy = REFRESH_FUNCS.get(provider)
+    if legacy:
+        return legacy
+    from providers import refresh_funcs
+    return refresh_funcs().get(provider)
+
+
+def known_providers():
+    """Known legacy providers followed by adapters that expose login."""
+    from providers import login_funcs
+    return list(dict.fromkeys(PROVIDERS + list(login_funcs())))
+
+
 # ─── server-driven login flows (browser dashboard) ─────────────────────────
 # opencodex parity: the app never blocks a terminal. The local server starts a
 # flow (POST /api/oauth/login), opens the browser itself, and the dashboard
@@ -926,6 +950,21 @@ BROWSER_FLOWS: dict[str, dict] = {
 }
 
 
+def resolve_browser_flow(provider):
+    """The browser OAuth specification for a provider, legacy first."""
+    legacy = BROWSER_FLOWS.get(provider)
+    if legacy:
+        return legacy
+    from providers import browser_flows
+    return browser_flows().get(provider)
+
+
+def known_browser_providers():
+    """Providers that expose a browser OAuth flow, legacy first."""
+    from providers import browser_flows
+    return list(dict.fromkeys(list(BROWSER_FLOWS) + list(browser_flows())))
+
+
 def mask_email(email: str | None) -> str:
     """a***@domain — never surface a full address to the browser panel."""
     if not email or "@" not in email:
@@ -945,10 +984,11 @@ class LoginFlow:
     """
 
     def __init__(self, provider: str, on_complete=None, meta: dict | None = None):
-        if provider not in BROWSER_FLOWS:
+        spec = resolve_browser_flow(provider)
+        if spec is None:
             raise ValueError(f"{provider} is not a browser OAuth provider")
         self.provider = provider
-        self.spec = BROWSER_FLOWS[provider]
+        self.spec = spec
         self.state = gen_state()
         self.verifier = ""
         self.auth_url = ""

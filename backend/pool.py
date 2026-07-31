@@ -95,15 +95,16 @@ def cmd_add(provider, label=None, incognito=False):
     if provider == "devin":
         print("Devin uses API keys, not OAuth. Use: pool.py add-devin <api_key> [label]")
         return 1
-    if provider not in oauth.LOGIN_FUNCS:
-        print(f"Unknown provider: {provider}. Choose: {', '.join(oauth.PROVIDERS)}")
+    login = oauth.resolve_login(provider)
+    if login is None:
+        print(f"Unknown provider: {provider}. Choose: {', '.join(oauth.known_providers())}")
         return 1
     if label is None:
         existing = len([a for a in store.list_accounts(DB) if a["provider"] == provider])
         label = f"{provider} #{existing + 1}"
     print(f"\n=== Onboarding {label} ({provider}) ===")
     try:
-        result = oauth.LOGIN_FUNCS[provider](incognito=incognito)
+        result = login(incognito=incognito)
     except Exception as e:
         print(f"OAuth failed: {e}")
         store.log_event(DB, None, "onboard", False, str(e))
@@ -168,10 +169,11 @@ def cmd_reconnect(account_id, api_key=None, incognito=False):
                 return 1
             result = oauth.login_devin(api_key)
         else:
-            if provider not in oauth.LOGIN_FUNCS:
+            login = oauth.resolve_login(provider)
+            if login is None:
                 print(f"No reconnect flow for {provider}")
                 return 1
-            result = oauth.LOGIN_FUNCS[provider](incognito=incognito)
+            result = login(incognito=incognito)
     except Exception as e:
         print(f"Reconnect failed: {e}")
         store.log_event(DB, acct_id, "reconnect", False, str(e))
@@ -246,7 +248,8 @@ def cmd_refresh(account_id):
     if not tok["refresh_token"]:
         print(f"No refresh token for account {account_id}")
         return 1
-    if provider not in oauth.REFRESH_FUNCS:
+    refresh = oauth.resolve_refresh(provider)
+    if refresh is None:
         print(f"No refresh function for {provider}")
         return 1
     try:
@@ -263,7 +266,7 @@ def cmd_refresh(account_id):
                 client_id, client_secret = oauth._load_antigravity_creds()
                 oauth.ANTIGRAVITY["client_id"] = client_id
                 oauth.ANTIGRAVITY["client_secret"] = client_secret
-            result = oauth.REFRESH_FUNCS[provider](tok["refresh_token"])
+            result = refresh(tok["refresh_token"])
             store.save_token(DB, aid, result["access_token"],
                              result.get("refresh_token"), result.get("id_token"),
                              result.get("expires_at"), result.get("raw"))

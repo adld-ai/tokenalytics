@@ -16,6 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import providers  # noqa: E402
 from providers import util  # noqa: E402
+import oauth  # noqa: E402
 import status  # noqa: E402
 import store  # noqa: E402
 import window_history as wh  # noqa: E402
@@ -79,6 +80,66 @@ class RegistryTest(unittest.TestCase):
     def test_real_package_discovery_does_not_raise(self):
         providers.reset_cache()
         self.assertIsInstance(providers.load(), dict)
+
+    def test_optional_oauth_hooks_and_capabilities_are_exposed(self):
+        login = lambda incognito=False: {"incognito": incognito}
+        refresh = lambda token: {"access_token": token}
+        plan_label = lambda snap: snap.get("plan")
+        extra = lambda snap: {"source": snap.get("source")}
+        browser_flow = {"host": "localhost", "port": 9876}
+        adapter = fake_adapter("hooked", util.AUTH_OAUTH)
+        adapter.LOGIN = login
+        adapter.REFRESH = refresh
+        adapter.BROWSER_FLOW = browser_flow
+        adapter.CAPS = frozenset({"heartbeat", "swap"})
+        adapter.PLAN_LABEL = plan_label
+        adapter.EXTRA = extra
+
+        providers.register(adapter)
+
+        self.assertIs(providers.login_funcs()["hooked"], login)
+        self.assertIs(providers.refresh_funcs()["hooked"], refresh)
+        self.assertIs(providers.browser_flows()["hooked"], browser_flow)
+        self.assertEqual(providers.caps("hooked"),
+                         frozenset({"heartbeat", "swap"}))
+        self.assertIs(providers.hook("hooked", "PLAN_LABEL"), plan_label)
+        self.assertIs(providers.hook("hooked", "EXTRA"), extra)
+        self.assertIs(oauth.resolve_login("hooked"), login)
+        self.assertIs(oauth.resolve_refresh("hooked"), refresh)
+        self.assertIn("hooked", oauth.known_providers())
+
+    def test_legacy_oauth_hooks_override_adapter_hooks(self):
+        legacy_login = oauth.resolve_login("codex")
+        legacy_refresh = oauth.resolve_refresh("codex")
+        adapter = fake_adapter("codex", util.AUTH_OAUTH)
+        adapter.LOGIN = lambda incognito=False: None
+        adapter.REFRESH = lambda token: None
+        providers.register(adapter)
+
+        self.assertIs(oauth.resolve_login("codex"), legacy_login)
+        self.assertIs(oauth.resolve_refresh("codex"), legacy_refresh)
+
+    def test_adapter_with_unknown_capability_is_rejected(self):
+        adapter = fake_adapter("future", util.AUTH_OAUTH)
+        adapter.CAPS = frozenset({"teleport"})
+        with self.assertRaises(ValueError):
+            providers.register(adapter)
+
+    def test_optional_callable_hooks_are_validated(self):
+        for attr in ("LOGIN", "REFRESH", "PLAN_LABEL", "EXTRA"):
+            with self.subTest(attr=attr):
+                adapter = fake_adapter(f"bad-{attr.lower()}", util.AUTH_OAUTH)
+                setattr(adapter, attr, "not callable")
+                with self.assertRaises(ValueError):
+                    providers.register(adapter)
+
+    def test_missing_optional_hooks_have_empty_defaults(self):
+        providers.register(fake_adapter("plain", util.AUTH_NONE))
+        self.assertEqual(providers.caps("plain"), frozenset())
+        self.assertIsNone(providers.hook("plain", "LOGIN"))
+        self.assertNotIn("plain", providers.login_funcs())
+        self.assertNotIn("plain", providers.refresh_funcs())
+        self.assertNotIn("plain", providers.browser_flows())
 
 
 class WindowHelperTest(unittest.TestCase):

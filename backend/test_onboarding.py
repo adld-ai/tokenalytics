@@ -236,7 +236,9 @@ class OnboardingPollTests(unittest.TestCase):
 
     def test_every_oauth_provider_onboarding_polls(self):
         """cmd_add must call poller.poll_account for every OAuth provider."""
-        for provider in oauth.LOGIN_FUNCS:
+        providers_with_login = [provider for provider in oauth.known_providers()
+                                if oauth.resolve_login(provider) is not None]
+        for provider in providers_with_login:
             with self.subTest(provider=provider):
                 _, snap = self._onboard(provider)
                 self.assertEqual(snap["status"], "active",

@@ -118,7 +118,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/status":
             return self._json(_status_payload())
         if path == "/api/oauth/providers":
-            return self._json({"providers": list(oauth.BROWSER_FLOWS.keys())})
+            return self._json({"providers": oauth.known_browser_providers()})
         if path == "/api/oauth/status":
             return self._oauth_status()
         return self._json({"error": "not found"}, 404)
@@ -151,7 +151,7 @@ class Handler(BaseHTTPRequestHandler):
     def _oauth_login(self):
         body = self._body_json()
         provider = str(body.get("provider", "")).strip().lower()
-        if provider not in oauth.BROWSER_FLOWS:
+        if oauth.resolve_browser_flow(provider) is None:
             return self._json({"error": "unknown oauth provider"}, 400)
         reconnect_id = body.get("account_id")
         label = body.get("label")

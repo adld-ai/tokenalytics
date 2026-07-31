@@ -1038,7 +1038,8 @@ def _refresh_if_needed(conn, account, token):
     if not token or not token.get("refresh_token"):
         return token
     provider = account["provider"]
-    if provider not in oauth.REFRESH_FUNCS:
+    refresh = oauth.resolve_refresh(provider)
+    if refresh is None:
         return token
     if token.get("expires_at") and token["expires_at"] - time.time() < 3600:
         try:
@@ -1054,7 +1055,7 @@ def _refresh_if_needed(conn, account, token):
                     client_id, client_secret = oauth._load_antigravity_creds()
                     oauth.ANTIGRAVITY["client_id"] = client_id
                     oauth.ANTIGRAVITY["client_secret"] = client_secret
-                result = oauth.REFRESH_FUNCS[provider](token["refresh_token"])
+                result = refresh(token["refresh_token"])
                 store.save_token(conn, account["id"], result["access_token"],
                                  result.get("refresh_token"), result.get("id_token"),
                                  result.get("expires_at"), result.get("raw"))

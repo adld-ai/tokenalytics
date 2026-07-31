@@ -221,7 +221,7 @@ def _pre_refresh(conn, account, token_row, now, refresh_cb=None):
         return token_row
     if refresh_cb is None:
         import oauth
-        refresh_cb = oauth.REFRESH_FUNCS.get(account["provider"])
+        refresh_cb = oauth.resolve_refresh(account["provider"])
     if refresh_cb is None:
         return token_row
     import work_queue
