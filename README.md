@@ -97,53 +97,65 @@ where a real API exists.**
 
 ## How it works
 
-Two pipelines: **onboarding** (connect an account over OAuth) writes tokens to
-`pool.db`; **polling** reads those tokens, calls each provider's quota API, and
-writes `secrets/status.json` for the app to render.
+Two pipelines share one adapter registry. **Onboarding** asks the provider
+adapter which auth kind and login hooks it supports, then stores the resulting
+account in `pool.db`. **Polling** dispatches to that same adapter, which emits
+provider-neutral quota windows. The backend writes those windows to
+`secrets/status.json`, and the multi-file Swift app renders them without
+provider-specific menu code.
 
 ### Flow
 
 ```mermaid
 flowchart TD
-    A["Add New Agent<br/>(menu or CLI)"] --> B[pool.py cmd_add]
-    B --> C{Auth type?}
+    A["Add New Agent<br/>(menu or CLI)"] --> B[providers.load registry]
+    B --> C{Adapter auth path?}
     C -->|OAuth browser| D[PKCE flow]
-    C -->|Device flow| E[Device code]
+    C -->|OAuth device flow| E[Device code]
     C -->|API key| F[Devin API key]
-    D --> G[tokens + email + plan]
+    C -->|Local file| V[Vendor CLI credentials]
+    C -->|None| X[No credentials]
+    D --> G[account identity + plan]
     E --> G
     F --> G
+    V --> G
+    X --> G
     G --> H[(pool.db)]
 
     I[poll-loop daemon<br/>5-min base, 60s hot] --> J[poller.run_loop]
     K["Poll Now<br/>(on demand)"] --> L[poller.run_once]
     J --> M[for each account]
     L --> M
-    M --> N{token expiring?}
-    N -->|yes| O[refresh token]
-    O --> H
-    N -->|no| P[provider quota API]
-    P --> Q[parse remaining % + reset]
-    Q --> R[(pool.db snapshot)]
-    R --> S[status.json]
-    S --> T["TokenStatusBar.app<br/>reads every 30s"]
-    T --> U[menu bar dropdown + dots]
+    M --> N[resolve provider adapter]
+    N --> O{token expiring?}
+    O -->|yes| P[adapter refresh hook]
+    P --> H
+    O -->|no or tokenless| Q[adapter poll]
+    Q --> R[declared windows]
+    R --> S[(pool.db snapshot)]
+    S --> T[status.json]
+    T --> U["TokenStatusBar.app<br/>reads every 30s"]
+    U --> W[menu bar dropdown + dots]
 ```
 
-### Onboarding — connecting OAuth
+### Onboarding — connecting an account
 
 ```mermaid
 flowchart TD
-    A["Add New Agent (menu) /<br/>pool.py add &lt;provider&gt; (CLI)"] --> B[pool.py cmd_add]
-    B --> C{auth type}
-    C -->|OAuth browser<br/>codex/claude/xai/antigravity| D1["build authorize URL + PKCE verifier<br/>start local callback server<br/>open_browser → user approves"]
-    C -->|Device flow<br/>copilot| D2["POST device/code → user_code + verification_uri<br/>show code, open browser<br/>poll token endpoint until authorized"]
-    C -->|API key<br/>devin| D3["user supplies API key<br/>validate against Devin API"]
+    A["Add New Agent (menu) /<br/>pool.py add &lt;provider&gt; (CLI)"] --> B[providers.load]
+    B --> C[adapter AUTH + login hooks]
+    C -->|OAuth browser| D1["adapter browser flow<br/>PKCE callback → user approves"]
+    C -->|Device flow| D2["adapter login hook<br/>device code → token polling"]
+    C -->|API key| D3["secure prompt<br/>adapter validates key"]
+    C -->|Local file| D4["adapter reads vendor CLI credentials"]
+    C -->|None| D5[no credential setup]
     D1 --> E["access + refresh token"]
     D2 --> E
     D3 --> E
-    E --> F["oauth.LOGIN_FUNCS returns<br/>tokens + email + plan"]
-    F --> G["store.upsert_account +<br/>store.save_token"]
+    D4 --> E
+    D5 --> E
+    E --> F["account identity + plan"]
+    F --> G["store.upsert_account<br/>save token when required"]
     G --> H[(pool.db)]
 ```
 
@@ -155,15 +167,15 @@ flowchart TD
     C["Poll Now (on demand)"] --> D[pool.py poll → poller.run_once]
     B --> E[for each account in store.list_accounts]
     D --> E
-    E --> F[token = store.get_token]
-    F --> G{"token expiring (< 1h)?"}
-    G -->|yes| H["oauth.REFRESH_FUNCS → save refreshed token"]
-    H --> I[(pool.db)]
-    G -->|no| J["POLLERS[provider](token) ─HTTPS─► provider quota API"]
-    J --> K["parse remaining % + reset time"]
-    K --> L[store.save_snapshot]
-    L --> I
-    I --> M[status.cmd_export → status.json]
+    E --> F[providers.get account.provider]
+    F --> G{adapter requires a token?}
+    G -->|yes| H["load token; run adapter REFRESH when needed"]
+    G -->|no| J[adapter reads local source]
+    H --> K[adapter poll]
+    J --> K
+    K --> L["util.snapshot(windows[])"]
+    L --> I[(pool.db)]
+    I --> M["status.cmd_export → status.json"]
     M --> N["TokenStatusBar.app reads every 30s → dropdown UI + dots"]
 ```
 
@@ -178,12 +190,15 @@ flowchart TD
 | Path                 | Purpose |
 |----------------------|---------|
 | `app/*.swift`        | Multi-file Swift menu-bar UI compiled directly with `swiftc`. |
-| `build.sh`           | Compiles and bundles `TokenStatusBar.app`. |
+| `app/Tests/`         | Swift characterization fixtures and golden submenu coverage. |
+| `build.sh`           | Compiles and bundles the app; `--dmg` creates the release image. |
+| `test.sh`            | Enforces Swift file ceilings, compiles the test harness, and runs its assertions. |
+| `backend/providers/*.py` | Auto-discovered registry: one adapter per provider, including auth, polling, capabilities, and window mapping. |
 | `backend/pool.py`    | CLI: onboarding, polling, status export. |
-| `backend/poller.py`  | Per-provider real-time quota polling. |
+| `backend/poller.py`  | Registry-driven polling cadence and snapshot orchestration. |
 | `backend/status.py`  | Writes `status.json` for the app to read. |
 | `backend/store.py`   | SQLite storage (`pool.db`). |
-| `backend/oauth.py`   | OAuth / device-flow login per provider. |
+| `backend/oauth.py`   | Shared OAuth orchestration over adapter-declared login and refresh hooks. |
 | `secrets/status.json` | Snapshot consumed by the menu-bar app (git-ignored). |
 | `secrets/pool.db`    | SQLite account/quota store (git-ignored). |
 
@@ -194,7 +209,9 @@ environment variables.
 ## Build & run the app
 
 ```bash
+./test.sh
 ./build.sh
+./build.sh --dmg
 open /Applications/TokenStatusBar.app
 ```
 

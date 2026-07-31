@@ -93,53 +93,65 @@ API가 있으면 스크래핑하지 않습니다.**
 
 ## 동작 방식
 
-두 개의 파이프라인이 있습니다. **온보딩**(OAuth로 계정 연결)은 토큰을
-`pool.db`에 저장하고, **폴링**은 그 토큰으로 각 제공자의 쿼터 API를 호출해
-앱이 표시할 `secrets/status.json`을 생성합니다.
+두 파이프라인은 하나의 어댑터 레지스트리를 함께 사용합니다. **온보딩**은
+제공자 어댑터가 선언한 인증 방식과 로그인 훅을 따라 계정을 `pool.db`에
+저장합니다. **폴링**도 같은 어댑터를 호출하고, 어댑터는 제공자에 상관없이
+같은 형식의 쿼터 윈도우를 반환합니다. 백엔드는 이 윈도우를
+`secrets/status.json`에 기록하며, 여러 파일로 나뉜 Swift 앱은 제공자별
+분기 없이 이를 메뉴에 표시합니다.
 
 ### 흐름도
 
 ```mermaid
 flowchart TD
-    A["Add New Agent<br/>(메뉴 또는 CLI)"] --> B[pool.py cmd_add]
-    B --> C{인증 방식?}
+    A["Add New Agent<br/>(메뉴 또는 CLI)"] --> B[providers.load 레지스트리]
+    B --> C{어댑터 인증 경로?}
     C -->|OAuth 브라우저| D[PKCE 플로우]
-    C -->|디바이스 플로우| E[디바이스 코드]
+    C -->|OAuth 디바이스 플로우| E[디바이스 코드]
     C -->|API 키| F[Devin API 키]
-    D --> G[토큰 + 이메일 + 요금제]
+    C -->|로컬 파일| V[제공자 CLI 자격증명]
+    C -->|인증 불필요| X[자격증명 없음]
+    D --> G[계정 식별 정보 + 요금제]
     E --> G
     F --> G
+    V --> G
+    X --> G
     G --> H[(pool.db)]
 
     I[poll-loop 데몬<br/>기본 5분, hot 60초] --> J[poller.run_loop]
     K["Poll Now<br/>(즉시 실행)"] --> L[poller.run_once]
     J --> M[각 계정마다]
     L --> M
-    M --> N{토큰 만료 임박?}
-    N -->|예| O[토큰 갱신]
-    O --> H
-    N -->|아니오| P[제공자 쿼터 API]
-    P --> Q[잔여 % + 리셋 시간 파싱]
-    Q --> R[(pool.db 스냅샷)]
-    R --> S[status.json]
-    S --> T["TokenStatusBar.app<br/>30초마다 읽기"]
-    T --> U[메뉴 막대 드롭다운 + 점]
+    M --> N[제공자 어댑터 조회]
+    N --> O{토큰 만료 임박?}
+    O -->|예| P[어댑터 갱신 훅]
+    P --> H
+    O -->|아니오 또는 토큰 불필요| Q[어댑터 폴링]
+    Q --> R[선언형 쿼터 윈도우]
+    R --> S[(pool.db 스냅샷)]
+    S --> T[status.json]
+    T --> U["TokenStatusBar.app<br/>30초마다 읽기"]
+    U --> W[메뉴 막대 드롭다운 + 점]
 ```
 
-### 온보딩 — OAuth 연결
+### 온보딩 — 계정 연결
 
 ```mermaid
 flowchart TD
-    A["Add New Agent (메뉴) /<br/>pool.py add &lt;provider&gt; (CLI)"] --> B[pool.py cmd_add]
-    B --> C{인증 방식}
-    C -->|OAuth 브라우저<br/>codex/claude/xai/antigravity| D1["authorize URL + PKCE verifier 생성<br/>로컬 콜백 서버 시작<br/>open_browser → 사용자 승인"]
-    C -->|디바이스 플로우<br/>copilot| D2["POST device/code → user_code + verification_uri<br/>코드 표시, 브라우저 열기<br/>인증될 때까지 토큰 엔드포인트 폴링"]
-    C -->|API 키<br/>devin| D3["사용자가 API 키 입력<br/>Devin API로 검증"]
+    A["Add New Agent (메뉴) /<br/>pool.py add &lt;provider&gt; (CLI)"] --> B[providers.load]
+    B --> C[어댑터 AUTH + 로그인 훅]
+    C -->|OAuth 브라우저| D1["어댑터 브라우저 플로우<br/>PKCE 콜백 → 사용자 승인"]
+    C -->|디바이스 플로우| D2["어댑터 로그인 훅<br/>디바이스 코드 → 토큰 폴링"]
+    C -->|API 키| D3["보안 입력창<br/>어댑터가 키 검증"]
+    C -->|로컬 파일| D4["어댑터가 제공자 CLI 자격증명 읽기"]
+    C -->|인증 불필요| D5[별도 자격증명 설정 없음]
     D1 --> E["access + refresh token"]
     D2 --> E
     D3 --> E
-    E --> F["oauth.LOGIN_FUNCS 반환<br/>토큰 + 이메일 + 요금제"]
-    F --> G["store.upsert_account +<br/>store.save_token"]
+    D4 --> E
+    D5 --> E
+    E --> F["계정 식별 정보 + 요금제"]
+    F --> G["store.upsert_account<br/>필요한 경우에만 토큰 저장"]
     G --> H[(pool.db)]
 ```
 
@@ -151,15 +163,15 @@ flowchart TD
     C["Poll Now (즉시 실행)"] --> D[pool.py poll → poller.run_once]
     B --> E[store.list_accounts 각 계정마다]
     D --> E
-    E --> F[token = store.get_token]
-    F --> G{"토큰 만료 임박 (< 1h)?"}
-    G -->|예| H["oauth.REFRESH_FUNCS → 갱신된 토큰 저장"]
-    H --> I[(pool.db)]
-    G -->|아니오| J["POLLERS[provider](token) ─HTTPS─► 제공자 쿼터 API"]
-    J --> K["잔여 % + 리셋 시간 파싱"]
-    K --> L[store.save_snapshot]
-    L --> I
-    I --> M[status.cmd_export → status.json]
+    E --> F[providers.get account.provider]
+    F --> G{어댑터에 토큰이 필요한가?}
+    G -->|예| H["토큰 읽기; 필요하면 adapter REFRESH 실행"]
+    G -->|아니오| J[어댑터가 로컬 소스 읽기]
+    H --> K[어댑터 poll]
+    J --> K
+    K --> L["util.snapshot(windows[])"]
+    L --> I[(pool.db)]
+    I --> M["status.cmd_export → status.json"]
     M --> N["TokenStatusBar.app 30초마다 읽기 → 드롭다운 UI + 점"]
 ```
 
@@ -174,12 +186,15 @@ flowchart TD
 | 경로                 | 용도 |
 |----------------------|------|
 | `app/*.swift`        | `swiftc`로 직접 컴파일하는 다중 파일 Swift 메뉴 막대 UI. |
-| `build.sh`           | `TokenStatusBar.app` 컴파일 및 번들링. |
+| `app/Tests/`         | Swift 동작 고정용 fixture와 계정 하위 메뉴 golden 테스트. |
+| `build.sh`           | 앱을 컴파일하고 번들링하며, `--dmg`로 배포 이미지를 생성. |
+| `test.sh`            | Swift 파일 크기 제한을 검사하고 테스트 하네스를 컴파일·실행. |
+| `backend/providers/*.py` | 자동 탐색 레지스트리. 제공자별 어댑터 하나가 인증, 폴링, 기능, 윈도우 변환을 담당. |
 | `backend/pool.py`    | CLI: 온보딩, 폴링, 상태 내보내기. |
-| `backend/poller.py`  | 제공자별 실시간 쿼터 폴링. |
+| `backend/poller.py`  | 레지스트리 기반 폴링 주기와 스냅샷 처리. |
 | `backend/status.py`  | 앱이 읽을 `status.json` 생성. |
 | `backend/store.py`   | SQLite 저장소 (`pool.db`). |
-| `backend/oauth.py`   | 제공자별 OAuth / 디바이스 플로우 로그인. |
+| `backend/oauth.py`   | 어댑터가 선언한 로그인·갱신 훅을 실행하는 공통 OAuth 처리 계층. |
 | `secrets/status.json` | 메뉴 막대 앱이 사용하는 스냅샷 (git 무시). |
 | `secrets/pool.db`    | SQLite 계정/쿼터 저장소 (git 무시). |
 
@@ -190,7 +205,9 @@ flowchart TD
 ## 앱 빌드 및 실행
 
 ```bash
+./test.sh
 ./build.sh
+./build.sh --dmg
 open /Applications/TokenStatusBar.app
 ```
 

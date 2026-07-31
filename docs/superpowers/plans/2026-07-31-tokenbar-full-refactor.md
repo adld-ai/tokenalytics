@@ -984,3 +984,20 @@ size matters). Every PR: suite green + `.dmg` builds first (AGENTS.md).
 | 5–10 | Phase 5 per provider | medium — golden-gated |
 | 11 | Phase 6 (teardown + registry) | medium |
 | 12 | Phase 7 (verify + docs) | none |
+
+## Outcome
+
+- Final verification: `391 passed, 2 skipped, 30 subtests passed`; `test.sh`
+  ran 28 Swift assertions and ended with `all swift tests passed`; both the
+  installed `.app` build and `build/TokenStatusBar.dmg` completed successfully.
+- Structural audit: 8 discovered adapters; 0 entries in `poller.POLLERS`,
+  `oauth.LOGIN_FUNCS`, `REFRESH_FUNCS`, and `BROWSER_FLOWS`; 0 provider
+  branches in the five pipeline modules and 13 quarantined branches in
+  `legacy_windows.py`. The largest non-localization Swift file is 385 lines,
+  `Localization.swift` is 578, and the largest backend module is 794 lines.
+  Importing `poller` from `backend/` succeeds.
+- Known deferrals: the live provider smoke was not run against active accounts
+  in the sandbox (the configured database contained 0 accounts); delete
+  `legacy_windows.py` once every account snapshot inside the history scan
+  window contains declared `windows`; the 9 not-yet-built adapters remain out
+  of scope.

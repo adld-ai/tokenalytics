@@ -1,7 +1,7 @@
 # Provider adapter sync — design
 
 Date: 2026-07-31
-Status: implemented (framework), adapters pending research sign-off
+Status: implemented — framework complete; all six legacy providers migrated
 Research: `docs/research/2026-07-31-provider-usage-extraction.md`
 
 ## Goal
@@ -211,12 +211,14 @@ Two things outside the backend needed fixing for this to work end to end:
   not in it.** A new provider would sync correctly and stay invisible.
   Unknown providers are now appended after the known ones.
 
-## 6. Deliberately not done
+## 6. Follow-up status
 
-- **No migration of the six existing providers.** Their columns and
-  branches still work and are covered by the existing suite. Moving them
-  onto declared windows is mechanical but it is churn with regression risk
-  and no user-visible gain; do it per-provider if one needs changing anyway.
-- **No generalization of `local_sync.py` yet.** It should become an
-  adapter source kind, but it also feeds `live_activity` (context %, tokens
-  in the last hour), which is a different concern from quota windows.
+- **Done: migrate the six existing providers.** Codex, Claude, xAI,
+  Antigravity, Copilot, and Devin now own polling, auth hooks, capabilities,
+  plan metadata, and declared windows in their adapter modules. The legacy
+  dispatch maps are empty; only `legacy_windows.py` remains temporarily for
+  snapshots written before the migration.
+- **Still deliberately not done: generalize `local_sync.py`.** It should
+  become an adapter source kind, but it also feeds `live_activity` (context
+  %, tokens in the last hour), which is a different concern from quota
+  windows.
