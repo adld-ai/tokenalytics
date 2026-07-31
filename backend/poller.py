@@ -8,10 +8,14 @@ Limit sources:
   antigravity:  cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels (per-model remainingFraction)
   copilot:      api.github.com/copilot_internal/user (quota_snapshots.premium_interactions)
   devin:        server.codeium.com GetUserStatus protobuf (daily/weekly quota %)
+
+Everything above predates the adapter registry and stays hand-written here.
+Providers added since live in backend/providers/ and reach this module through
+resolve_poller(); see that package's docstring.
 """
 from __future__ import annotations
 import json, os, re, sys, time, datetime, urllib.request, urllib.error
-import store, oauth, window_history, work_queue
+import providers, store, oauth, window_history, work_queue
 
 WHAM = "https://chatgpt.com/backend-api"
 POLL_INTERVAL = int(os.environ.get("AGENT_POOL_POLL_INTERVAL", "300"))  # 5 min
@@ -1020,6 +1024,15 @@ POLLERS = {
 }
 
 
+def resolve_poller(provider):
+    """The poll callable for a provider, legacy table first.
+
+    POLLERS stays authoritative so tests (and any future override) can patch a
+    provider by assigning to it; adapters fill in everything else.
+    """
+    return POLLERS.get(provider) or providers.pollers().get(provider)
+
+
 def _refresh_if_needed(conn, account, token):
     """Auto-refresh tokens that expire within 1 hour."""
     if not token or not token.get("refresh_token"):
@@ -1061,11 +1074,11 @@ def _poll_one(conn, account) -> bool:
     between. Detection failures never fail the poll.
     """
     token = store.get_token(conn, account["id"])
-    if not token:
+    if not token and providers.requires_token(account["provider"]):
         store.save_snapshot(conn, account["id"], {"status": "error", "status_message": "no token"})
         return False
     token = _refresh_if_needed(conn, account, token)
-    poller = POLLERS.get(account["provider"])
+    poller = resolve_poller(account["provider"])
     if not poller:
         store.save_snapshot(conn, account["id"],
                             {"status": "error", "status_message": f"no poller for {account['provider']}"})
