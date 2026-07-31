@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS limit_snapshots (
     status TEXT,                     -- active|error|expired|rate_limited
     status_message TEXT,
     plan TEXT,
-    -- codex wham
+    -- deprecated provider-window columns; retained for historical snapshots
     primary_used_pct REAL,
     primary_reset_at REAL,
     primary_window_s INTEGER,
@@ -46,19 +46,19 @@ CREATE TABLE IF NOT EXISTS limit_snapshots (
     secondary_window_s INTEGER,
     credits_balance REAL,
     banked_resets INTEGER,
-    -- generic rate-limit headers (claude/xai/google/copilot/devin)
+    -- deprecated provider rate-limit columns; retained for historical rows
     rate_limit_remaining TEXT,
     rate_limit_reset TEXT,
     rate_limit_limit TEXT,
-    -- copilot sku / limited-user quotas
+    -- deprecated copilot columns; retained for historical rows
     sku TEXT,
     limited_user_quotas TEXT,
     limited_user_reset_date TEXT,
-    -- devin daily/weekly quota percent + billing cycle reset
+    -- deprecated devin columns; retained for historical rows
     daily_quota_remaining_percent REAL,
     weekly_quota_remaining_percent REAL,
     plan_reset_unix REAL,
-    -- xai monthly billing window
+    -- deprecated xai columns; retained for historical rows
     monthly_used REAL,
     monthly_limit REAL,
     monthly_used_pct REAL,
@@ -306,12 +306,7 @@ def get_token(conn, account_id) -> dict | None:
 def save_snapshot(conn, account_id, snap: dict):
     fields = ("status","status_message","plan","primary_used_pct","primary_reset_at",
               "primary_window_s","secondary_used_pct","secondary_reset_at","secondary_window_s",
-              "credits_balance","banked_resets","rate_limit_remaining","rate_limit_reset",
-              "rate_limit_limit","raw_json",
-              "sku","limited_user_quotas","limited_user_reset_date",
-              "daily_quota_remaining_percent","weekly_quota_remaining_percent","plan_reset_unix",
-              "monthly_used","monthly_limit","monthly_used_pct",
-              "monthly_period_start","monthly_period_end","source")
+              "credits_balance","raw_json","source")
     vals = [snap.get(f) for f in fields]
     conn.execute(
         f"INSERT INTO limit_snapshots(account_id,ts,{','.join(fields)}) VALUES(?,?,{','.join('?'*len(fields))})",

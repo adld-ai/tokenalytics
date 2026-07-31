@@ -10,7 +10,7 @@ from __future__ import annotations
 import csv, datetime, io, json, os, re, time, zoneinfo
 from dataclasses import dataclass, field
 from pathlib import Path
-import store
+import legacy_windows, store
 
 HISTORY_DIR = Path(os.environ.get("AGENT_POOL_HISTORY_DIR",
                                   str(Path.home() / "solo/token-status-bar" / "history")))
@@ -96,47 +96,6 @@ def _parse_iso_ts(s) -> float | None:
     return dt.timestamp()
 
 
-def _fable(snap) -> dict | None:
-    """Claude's model-scoped weekly window from raw_json (best-effort)."""
-    try:
-        rj = json.loads(snap.get("raw_json") or "{}")
-    except Exception:
-        return None
-    f = rj.get("fable") if isinstance(rj, dict) else None
-    if isinstance(f, dict) and f.get("used_pct") is not None and f.get("reset_at"):
-        return f
-    return None
-
-
-def _agy_usage_windows(snap) -> list[dict]:
-    """Antigravity per-group 5h/weekly windows from raw_json extra (best-effort).
-
-    Poller stores agy_usage.fetch_usage() output under extra.usage_windows:
-    [{"group": "gemini"|"other", "window": "5h"|"weekly",
-      "remaining_pct": float, "reset_at": epoch_or_None}]
-    """
-    try:
-        rj = json.loads(snap.get("raw_json") or "{}")
-    except Exception:
-        return []
-    extra = rj.get("extra") if isinstance(rj, dict) else None
-    ws = extra.get("usage_windows") if isinstance(extra, dict) else None
-    out = []
-    for w in ws or []:
-        if not isinstance(w, dict):
-            continue
-        rem = _pct(w.get("remaining_pct"))
-        if rem is None or not w.get("reset_at"):
-            continue
-        window = "weekly" if w.get("window") == "weekly" else "5h"
-        group = w.get("group") or "other"
-        out.append({"kind": f"{window}_{group}",
-                    "used_pct": max(0.0, min(100.0, 100.0 - rem)),
-                    "reset_at": w["reset_at"],
-                    "window_s": 604800 if window == "weekly" else 18000})
-    return out
-
-
 # Nominal duration of a declared window whose adapter did not state one.
 # monthly is deliberately absent: its length varies, so it stays None.
 WINDOW_S_BY_KIND = {"5h": 18000, "session": 18000, "daily": 86400,
@@ -220,27 +179,7 @@ def timed_windows(provider, snap) -> list[dict]:
                 start=_declared_timestamp(w.get("start")))
         return out
 
-    if provider in ("codex", "claude", "antigravity"):
-        add(_kind_from_window_s(snap.get("primary_window_s"), "5h"),
-            snap.get("primary_used_pct"), snap.get("primary_reset_at"),
-            snap.get("primary_window_s"))
-        add(_kind_from_window_s(snap.get("secondary_window_s"), "weekly"),
-            snap.get("secondary_used_pct"), snap.get("secondary_reset_at"),
-            snap.get("secondary_window_s"))
-        if provider == "claude":
-            f = _fable(snap)
-            if f:
-                add("weekly_fable", f.get("used_pct"), f.get("reset_at"), 604800)
-        if provider == "antigravity":
-            for w in _agy_usage_windows(snap):
-                add(w["kind"], w["used_pct"], w["reset_at"], w["window_s"])
-    elif provider == "copilot":
-        add("monthly_premium", snap.get("primary_used_pct"), snap.get("primary_reset_at"), None)
-    elif provider == "xai":
-        add("monthly", snap.get("monthly_used_pct"),
-            _parse_iso_ts(snap.get("monthly_period_end")), None,
-            start=_parse_iso_ts(snap.get("monthly_period_start")))
-    return out
+    return legacy_windows.timed(provider, snap)
 
 
 def drop_windows(provider, snap) -> list[dict]:
@@ -261,23 +200,7 @@ def drop_windows(provider, snap) -> list[dict]:
                             "boundary": w.get("boundary")})
         return out
 
-    if provider == "copilot":
-        used = _pct(snap.get("secondary_used_pct"))
-        if used is not None:
-            out.append({"kind": "monthly_chat", "used_pct": used,
-                        "boundary": snap.get("primary_reset_at")})
-    elif provider == "devin":
-        daily_rem = _pct(snap.get("daily_quota_remaining_percent"))
-        if daily_rem is not None:
-            out.append({"kind": "daily",
-                        "used_pct": 100.0 - daily_rem,
-                        "boundary": "midnight"})
-        weekly_rem = _pct(snap.get("weekly_quota_remaining_percent"))
-        if weekly_rem is not None:
-            out.append({"kind": "weekly",
-                        "used_pct": 100.0 - weekly_rem,
-                        "boundary": snap.get("plan_reset_unix")})
-    return out
+    return legacy_windows.drop(provider, snap)
 
 
 def _banked_decreased(prev_snap, new_snap) -> bool:

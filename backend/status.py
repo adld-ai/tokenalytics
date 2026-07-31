@@ -2,7 +2,7 @@
 from __future__ import annotations
 import calendar, json, os, re, sys, time, datetime, zoneinfo
 from pathlib import Path
-import providers, store
+import legacy_windows, providers, store
 
 STATUS_JSON = Path(os.environ.get("AGENT_POOL_STATUS_JSON",
                                     str(Path.home() / "solo/token-status-bar" / "secrets" / "status.json")))
@@ -381,76 +381,7 @@ def normalize_windows(provider, snap) -> list[dict]:
     declared = declared_windows(rj, src, as_of)
     if declared is not None:
         return declared
-    out = []
-
-    def add(w):
-        if w:
-            out.append(w)
-
-    if provider in ("codex", "claude"):
-        sev_active = {}
-        if provider == "claude":
-            for lim in (rj.get("usage_api") or {}).get("limits") or []:
-                if isinstance(lim, dict):
-                    sev_active[lim.get("kind")] = (lim.get("severity"),
-                                                   lim.get("is_active"))
-        s5, a5 = sev_active.get("session", (None, None))
-        sw, aw = sev_active.get("weekly_all", (None, None))
-        add(_win(_kind_from_window_s(snap.get("primary_window_s"), "5h"), None,
-                 snap.get("primary_used_pct"), snap.get("primary_reset_at"),
-                 severity=s5, is_active=a5, source=src, as_of=as_of))
-        add(_win(_kind_from_window_s(snap.get("secondary_window_s"), "weekly"), None,
-                 snap.get("secondary_used_pct"), snap.get("secondary_reset_at"),
-                 severity=sw, is_active=aw, source=src, as_of=as_of))
-        fable = rj.get("fable") or {}
-        if fable.get("used_pct") is not None:
-            add(_win("model_weekly", fable.get("label"), fable["used_pct"],
-                     fable.get("reset_at"), severity=fable.get("status"),
-                     source=src, as_of=as_of))
-    elif provider == "xai":
-        reset = None
-        end = snap.get("monthly_period_end")
-        if end:
-            dt = _parse_iso(end)
-            reset = dt.timestamp() if dt else None
-        add(_win("monthly", "credits", snap.get("monthly_used_pct"), reset,
-                 source=src, as_of=as_of))
-        if snap.get("secondary_window_s") == 86400:
-            add(_win("daily", None, snap.get("secondary_used_pct"),
-                     snap.get("secondary_reset_at"), source=src, as_of=as_of))
-    elif provider == "copilot":
-        add(_win("monthly", "premium", snap.get("primary_used_pct"),
-                 snap.get("primary_reset_at"), source=src, as_of=as_of))
-        add(_win("monthly", "chat", snap.get("secondary_used_pct"),
-                 snap.get("primary_reset_at"), source=src, as_of=as_of))
-    elif provider == "devin":
-        daily_rem = _pct(snap.get("daily_quota_remaining_percent"))
-        if daily_rem is not None:
-            add(_win("daily", None, 100.0 - daily_rem,
-                     snap.get("primary_reset_at"), source=src, as_of=as_of))
-        weekly_rem = _pct(snap.get("weekly_quota_remaining_percent"))
-        if weekly_rem is not None:
-            add(_win("weekly", None, 100.0 - weekly_rem,
-                     snap.get("secondary_reset_at"), source=src, as_of=as_of))
-    elif provider == "antigravity":
-        label = None
-        rem = snap.get("rate_limit_remaining") or ""
-        m = re.search(r"\(([^)]+)\)", rem)
-        if m:
-            label = m.group(1)
-        add(_win("model_weekly", label, snap.get("primary_used_pct"),
-                 snap.get("primary_reset_at"), source=src, as_of=as_of))
-        for w in (rj.get("extra") or {}).get("usage_windows") or []:
-            if not isinstance(w, dict):
-                continue
-            rem_pct = _pct(w.get("remaining_pct"))
-            if rem_pct is None:
-                continue
-            kind = "weekly" if w.get("window") == "weekly" else "5h"
-            add(_win(kind, w.get("group"),
-                     max(0.0, min(100.0, 100.0 - rem_pct)),
-                     w.get("reset_at"), source=src, as_of=as_of))
-    return out
+    return legacy_windows.normalize(provider, snap)
 
 
 # Cadences for the roll-forward in refresh_windows(). Normalized windows
