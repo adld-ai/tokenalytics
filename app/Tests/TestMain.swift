@@ -1,4 +1,4 @@
-import Foundation
+import Cocoa
 
 @main
 struct TestMain {
@@ -10,8 +10,15 @@ struct TestMain {
     }
 
     static func main() {
+        if CommandLine.arguments.contains("--record-golden-submenus") {
+            try! legacySubmenuDump().write(
+                to: goldenURL(), atomically: true, encoding: .utf8)
+            print("recorded \(goldenURL().path)")
+            return
+        }
         testStatusDecode()
         testFormatting()
+        testGoldenSubmenus()
         if failures > 0 { print("\(failures) FAILURES"); exit(1) }
         print("all swift tests passed")
     }
@@ -22,14 +29,47 @@ struct TestMain {
             .appendingPathComponent("fixture-status.json")
     }
 
+    static func goldenURL() -> URL {
+        fixtureURL().deletingLastPathComponent()
+            .appendingPathComponent("golden-submenus.txt")
+    }
+
     static func testStatusDecode() {
         let data = try! Data(contentsOf: fixtureURL())
         let p = try! JSONDecoder().decode(StatusPayload.self, from: data)
-        expect(p.accounts.count == 2, "fixture has 2 accounts")
+        expect(p.accounts.count == 7, "fixture has 7 accounts")
         expect(p.accounts[0].provider == "codex", "provider decodes")
         expect(p.accounts[0].windows?.first?.kind == "5h", "window kind decodes")
         expect(p.headline?.used_pct != nil, "headline decodes")
         expect(p.accounts[1].state?.usable != nil, "state decodes")
+    }
+
+    static func rowTitle(_ item: NSMenuItem) -> String {
+        if item.view is FixedMenuSeparatorView { return "<separator>" }
+        if let view = item.view,
+           let label = view.subviews.compactMap({ $0 as? NSTextField }).first {
+            return label.stringValue
+        }
+        return item.title
+    }
+
+    static func legacySubmenuDump() -> String {
+        L10n.lang = .en
+        let data = try! Data(contentsOf: fixtureURL())
+        let payload = try! JSONDecoder().decode(StatusPayload.self, from: data)
+        let delegate = AppDelegate()
+        var lines: [String] = []
+        for account in payload.accounts {
+            lines.append("[\(account.provider)]")
+            let item = delegate.accountItem(account)
+            lines.append(contentsOf: item.submenu!.items.map(rowTitle))
+        }
+        return lines.joined(separator: "\n") + "\n"
+    }
+
+    static func testGoldenSubmenus() {
+        let expected = try! String(contentsOf: goldenURL(), encoding: .utf8)
+        expect(legacySubmenuDump() == expected, "account submenus match golden")
     }
 
     static func testFormatting() {

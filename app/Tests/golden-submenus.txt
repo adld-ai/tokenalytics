@@ -1,0 +1,111 @@
+[codex]
+Status
+Plan: Plus ($20)
+Plus · paid · renews 08-15
+Plan started: 2026-01-15
+Plan resets: 2026-08-15
+Account created: 2025-11-02
+Previous payments: 6 successful payments
+Token expires: 2026-08-15 12:00
+Last poll: 2026-07-31 09:00
+<separator>
+Limit session
+5h limit: 61.0% used (Reset: 2026-07-31 15:00)
+weekly limit: 34.0% used (Reset: 2026-08-05 09:00)
+Additional credits: 1200
+<separator>
+Resets (1)
+2027-01-15 18:30
+<separator>
+Heartbeat
+Heartbeat: Success · Next 2026-07-31 09:05
+Last: 2026-07-31 08:55
+Last success: 2026-07-31 08:55
+Run Heartbeat Now
+<separator>
+Swap to This Account
+Reconnect This Account
+Delete This Agent
+[claude]
+Status
+Plan: Max 5x ($100)
+Max 5x · paid · renews 08-01
+Plan started: 2026-02-01
+Plan resets: 2026-08-01
+Token expires: 2026-08-20 10:00
+Last poll: 2026-07-31 08:59
+<separator>
+Limit session
+5h limit: 42.5% used (Reset: 2026-07-31 14:30)
+weekly limit: 76.0% used (Reset: 2026-08-04 11:00)
+Fable limit: 18.0% used (Reset: 2026-08-03 08:00)
+<separator>
+Reconnect This Account
+Delete This Agent
+[xai]
+Status
+Plan: SuperGrok ($30)
+SuperGrok · paid · renews 08-12
+Plan started: 2026-07-12
+Plan resets: 2026-08-12
+Token expires: 2026-09-01 00:00
+Last poll: 2026-07-31 08:58
+<separator>
+Limit session
+monthly limit: 52.0% used (Reset: 2026-08-12 00:00)
+<separator>
+Reconnect This Account
+Delete This Agent
+[antigravity]
+Status
+Plan: Ultra 5x ($100)
+Ultra 5x · paid · renews 08-10
+Plan started: 2026-03-10
+Plan resets: 2026-08-10
+Token expires: 2026-08-10 18:00
+Last poll: 2026-07-31 08:57
+<separator>
+Limit session
+Gemini models · 5h limit: 27.0% used (Reset: 2026-07-31 13:00)
+Claude & GPT models · weekly limit: 64.0% used (Reset: 2026-08-06 09:00)
+<separator>
+Reconnect This Account
+Delete This Agent
+[copilot]
+Status
+Plan: Pro+ ($39)
+Pro+ · paid · renews 08-01
+Plan started: 2026-07-01
+Plan resets: 2026-08-01
+Token expires: 2026-09-30 00:00
+Last poll: 2026-07-31 08:56
+<separator>
+Limit session
+premium requests: 83.0% used (Reset: 2026-08-01 00:00)
+<separator>
+Reconnect This Account
+Delete This Agent
+[devin]
+Status
+Plan: Teams ($80+$40/seat)
+Teams · paid · renews 08-01
+Plan started: 2026-04-01
+Plan resets: 2026-08-01
+Token expires: 2026-12-31 00:00
+Last poll: 2026-07-31 08:55
+<separator>
+Limit session
+weekly limit: 47.0% used (Reset: 2026-08-07 09:00)
+<separator>
+Reconnect This Account
+Delete This Agent
+[kimi]
+Plan: coding-plan
+coding-plan · paid
+Remaining: 880 requests
+Reset: 2026-08-03 09:00
+Limit: 1000 requests
+Last poll: 2026-07-31 08:54
+<separator>
+Reconnect This Account
+Delete This Agent

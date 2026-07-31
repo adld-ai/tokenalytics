@@ -1,10 +1,10 @@
 {
   "generated_at": "2026-07-31T09:00:00+09:00",
-  "account_count": 2,
+  "account_count": 7,
   "heartbeat": {
     "status": "ok",
     "next": "2026-07-31T09:05:00+09:00",
-    "accounts": 2,
+    "accounts": 3,
     "failed": 0
   },
   "headline": {
@@ -12,22 +12,54 @@
     "provider": "codex",
     "kind": "5h",
     "used_pct": 61.0,
-    "reset_at_epoch": 1785400000,
+    "reset_at_epoch": 1785463200,
     "severity": "warning"
   },
   "accounts": [
     {
       "id": 101,
       "provider": "codex",
-      "email": "alpha@example.invalid",
+      "email": "codex@example.invalid",
       "plan": "plus",
       "status": "active",
+      "token_expires": "2026-08-15 12:00",
+      "primary_used_pct": 61.0,
+      "primary_reset": "2026-07-31 15:00",
+      "secondary_used_pct": 34.0,
+      "secondary_reset": "2026-08-05 09:00",
+      "credits_balance": 1200.0,
+      "plan_start": "2026-01-15",
+      "plan_reset": "2026-08-15",
+      "account_created": "2025-11-02",
+      "payment_history": "6 successful payments",
+      "last_poll": "2026-07-31 09:00",
+      "heartbeat_status": "success",
+      "heartbeat_last": "2026-07-31 08:55",
+      "heartbeat_next": "2026-07-31 09:05",
+      "heartbeat_last_success": "2026-07-31 08:55",
+      "reset_credits": [
+        {
+          "title": "Synthetic usage reset",
+          "status": "available",
+          "expires_at": "2027-01-15 18:30:00 KST",
+          "granted_at": "2026-07-01 10:00:00 KST",
+          "description": "Usage recovery credit"
+        }
+      ],
       "windows": [
         {
           "kind": "5h",
           "used_pct": 61.0,
-          "reset_at_epoch": 1785400000,
+          "reset_at_epoch": 1785463200,
           "severity": "warning",
+          "is_active": true,
+          "source": "api"
+        },
+        {
+          "kind": "weekly",
+          "used_pct": 34.0,
+          "reset_at_epoch": 1785891600,
+          "severity": "normal",
           "is_active": true,
           "source": "api"
         }
@@ -35,12 +67,13 @@
       "state": {
         "auth": "ok",
         "subscription": "paid",
+        "sub_renews_at": "2026-08-15T00:00:00+09:00",
         "quota": "warning",
         "usable": true,
         "binding_window": {
           "kind": "5h",
           "used_pct": 61.0,
-          "reset_at_epoch": 1785400000,
+          "reset_at_epoch": 1785463200,
           "severity": "warning",
           "is_active": true,
           "source": "api"
@@ -49,16 +82,292 @@
     },
     {
       "id": 202,
+      "provider": "claude",
+      "email": "claude@example.invalid",
+      "plan": "max",
+      "status": "active",
+      "token_expires": "2026-08-20 10:00",
+      "rate_limit_tier": "max_5x",
+      "primary_used_pct": 42.5,
+      "primary_reset": "2026-07-31 14:30",
+      "secondary_used_pct": 76.0,
+      "secondary_reset": "2026-08-04 11:00",
+      "fable_used_pct": 18.0,
+      "fable_reset": "2026-08-03 08:00",
+      "fable_label": "Claude Fable",
+      "plan_start": "2026-02-01",
+      "plan_reset": "2026-08-01",
+      "last_poll": "2026-07-31 08:59",
+      "windows": [
+        {
+          "kind": "5h",
+          "used_pct": 42.5,
+          "reset_at_epoch": 1785461400,
+          "severity": "normal",
+          "is_active": true,
+          "source": "api"
+        },
+        {
+          "kind": "weekly",
+          "used_pct": 76.0,
+          "reset_at_epoch": 1785808800,
+          "severity": "normal",
+          "is_active": true,
+          "source": "api"
+        },
+        {
+          "kind": "model_weekly",
+          "label": "Claude Fable",
+          "used_pct": 18.0,
+          "reset_at_epoch": 1785711600,
+          "severity": "normal",
+          "is_active": true,
+          "source": "api"
+        }
+      ],
+      "state": {
+        "auth": "ok",
+        "subscription": "paid",
+        "sub_renews_at": "2026-08-01T00:00:00+09:00",
+        "quota": "ok",
+        "usable": true,
+        "binding_window": {
+          "kind": "5h",
+          "used_pct": 42.5,
+          "reset_at_epoch": 1785461400,
+          "severity": "normal",
+          "is_active": true,
+          "source": "api"
+        }
+      }
+    },
+    {
+      "id": 303,
+      "provider": "xai",
+      "email": "grok@example.invalid",
+      "plan": "supergrok",
+      "status": "active",
+      "token_expires": "2026-09-01 00:00",
+      "primary_used_pct": 52.0,
+      "primary_reset": "2026-08-12 00:00",
+      "monthly_used": 7800.0,
+      "monthly_limit": 15000.0,
+      "monthly_used_pct": 52.0,
+      "monthly_period_start": "2026-07-12",
+      "monthly_period_end": "2026-08-12",
+      "billing_period_start": "2026-07-12",
+      "on_demand_cap": 500,
+      "last_poll": "2026-07-31 08:58",
+      "windows": [
+        {
+          "kind": "monthly",
+          "label": "Grok credits",
+          "used_pct": 52.0,
+          "reset_at_epoch": 1786460400,
+          "severity": "normal",
+          "is_active": true,
+          "source": "api"
+        }
+      ],
+      "state": {
+        "auth": "ok",
+        "subscription": "paid",
+        "sub_renews_at": "2026-08-12T00:00:00+09:00",
+        "quota": "ok",
+        "usable": true,
+        "binding_window": {
+          "kind": "monthly",
+          "label": "Grok credits",
+          "used_pct": 52.0,
+          "reset_at_epoch": 1786460400,
+          "severity": "normal",
+          "is_active": true,
+          "source": "api"
+        }
+      }
+    },
+    {
+      "id": 404,
+      "provider": "antigravity",
+      "email": "antigravity@example.invalid",
+      "plan": "ultra",
+      "status": "active",
+      "token_expires": "2026-08-10 18:00",
+      "tier_override": "ultra_5x",
+      "primary_used_pct": 27.0,
+      "primary_reset": "2026-07-31 13:00",
+      "plan_start": "2026-03-10",
+      "plan_reset": "2026-08-10",
+      "last_poll": "2026-07-31 08:57",
+      "usage_windows": [
+        {
+          "group": "gemini",
+          "window": "5h",
+          "used_pct": 27.0,
+          "reset": "2026-07-31 13:00"
+        },
+        {
+          "group": "other",
+          "window": "weekly",
+          "used_pct": 64.0,
+          "reset": "2026-08-06 09:00"
+        }
+      ],
+      "windows": [
+        {
+          "kind": "5h",
+          "label": "Gemini models",
+          "used_pct": 27.0,
+          "reset_at_epoch": 1785456000,
+          "severity": "normal",
+          "is_active": true,
+          "source": "api"
+        },
+        {
+          "kind": "weekly",
+          "label": "Claude & GPT models",
+          "used_pct": 64.0,
+          "reset_at_epoch": 1785974400,
+          "severity": "normal",
+          "is_active": true,
+          "source": "api"
+        }
+      ],
+      "state": {
+        "auth": "ok",
+        "subscription": "paid",
+        "sub_renews_at": "2026-08-10T00:00:00+09:00",
+        "quota": "ok",
+        "usable": true,
+        "binding_window": {
+          "kind": "5h",
+          "label": "Gemini models",
+          "used_pct": 27.0,
+          "reset_at_epoch": 1785456000,
+          "severity": "normal",
+          "is_active": true,
+          "source": "api"
+        }
+      }
+    },
+    {
+      "id": 505,
+      "provider": "copilot",
+      "email": "copilot-handle",
+      "github_email": "copilot@example.invalid",
+      "plan": "pro_plus",
+      "status": "active",
+      "token_expires": "2026-09-30 00:00",
+      "primary_used_pct": 83.0,
+      "primary_reset": "2026-08-01 00:00",
+      "sku": "copilot_pro_plus",
+      "limited_user_quotas": "1000 premium requests",
+      "limited_user_reset_date": "2026-08-01 00:00",
+      "billing_period_start": "2026-07-01",
+      "plan_reset": "2026-08-01",
+      "last_poll": "2026-07-31 08:56",
+      "windows": [
+        {
+          "kind": "monthly",
+          "label": "Premium requests",
+          "used_pct": 83.0,
+          "reset_at_epoch": 1785510000,
+          "severity": "warning",
+          "is_active": true,
+          "source": "api"
+        }
+      ],
+      "state": {
+        "auth": "ok",
+        "subscription": "paid",
+        "sub_renews_at": "2026-08-01T00:00:00+09:00",
+        "quota": "warning",
+        "usable": true,
+        "binding_window": {
+          "kind": "monthly",
+          "label": "Premium requests",
+          "used_pct": 83.0,
+          "reset_at_epoch": 1785510000,
+          "severity": "warning",
+          "is_active": true,
+          "source": "api"
+        }
+      }
+    },
+    {
+      "id": 606,
+      "provider": "devin",
+      "email": "devin@example.invalid",
+      "plan": "team",
+      "status": "active",
+      "token_expires": "2026-12-31 00:00",
+      "secondary_used_pct": 47.0,
+      "secondary_reset": "2026-08-07 09:00",
+      "credit_balance": 320.0,
+      "plan_start": "2026-04-01",
+      "plan_reset": "2026-08-01",
+      "last_poll": "2026-07-31 08:55",
+      "windows": [
+        {
+          "kind": "daily",
+          "label": "Daily compute units",
+          "used_pct": 31.0,
+          "severity": "normal",
+          "is_active": true,
+          "source": "api"
+        },
+        {
+          "kind": "weekly",
+          "label": "Weekly compute units",
+          "used_pct": 47.0,
+          "reset_at_epoch": 1786060800,
+          "severity": "normal",
+          "is_active": true,
+          "source": "api"
+        }
+      ],
+      "state": {
+        "auth": "ok",
+        "subscription": "paid",
+        "sub_renews_at": "2026-08-01T00:00:00+09:00",
+        "quota": "ok",
+        "usable": true,
+        "binding_window": {
+          "kind": "weekly",
+          "label": "Weekly compute units",
+          "used_pct": 47.0,
+          "reset_at_epoch": 1786060800,
+          "severity": "normal",
+          "is_active": true,
+          "source": "api"
+        }
+      }
+    },
+    {
+      "id": 707,
       "provider": "kimi",
-      "email": "beta@example.invalid",
+      "email": "kimi@example.invalid",
       "plan": "coding-plan",
       "status": "active",
+      "rate_limit_remaining": "880 requests",
+      "rate_limit_reset": "2026-08-03 09:00",
+      "rate_limit_limit": "1000 requests",
+      "last_poll": "2026-07-31 08:54",
       "windows": [
         {
           "kind": "weekly",
-          "used_pct": 12.5,
-          "label": "GLM-4.7",
-          "reset_at_epoch": 1785900000,
+          "used_pct": 12.0,
+          "reset_at_epoch": 1785715200,
+          "severity": "normal",
+          "is_active": true,
+          "source": "api"
+        },
+        {
+          "kind": "5h",
+          "used_pct": 8.5,
+          "reset_at_epoch": 1785463200,
+          "severity": "normal",
+          "is_active": true,
           "source": "api"
         }
       ],
@@ -68,10 +377,11 @@
         "quota": "ok",
         "usable": true,
         "binding_window": {
-          "kind": "weekly",
-          "label": "GLM-4.7",
-          "used_pct": 12.5,
-          "reset_at_epoch": 1785900000,
+          "kind": "5h",
+          "used_pct": 8.5,
+          "reset_at_epoch": 1785463200,
+          "severity": "normal",
+          "is_active": true,
           "source": "api"
         }
       }
@@ -79,8 +389,8 @@
   ],
   "last_swap": {
     "provider": "codex",
-    "from": "alpha@example.invalid",
-    "to": "gamma@example.invalid",
+    "from": "codex@example.invalid",
+    "to": "codex-next@example.invalid",
     "at": "2026-07-30T22:00:00+09:00",
     "at_epoch": 1785358800
   }
