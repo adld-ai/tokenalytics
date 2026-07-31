@@ -22,6 +22,7 @@ struct TestMain {
         }
         testStatusDecode()
         testFormatting()
+        testSwapCapability()
         testSubmenuSummaries()
         testGoldenSubmenus()
         if failures > 0 { print("\(failures) FAILURES"); exit(1) }
@@ -122,5 +123,22 @@ struct TestMain {
         expect(updated == "July 31, 2026 09:00", "formatUpdated formats local timestamp")
         expect(endSoon == "End Soon", "endSoonBadge labels low weekly quota")
         expect(couponIsEnding == true, "couponEndsSoon detects expiry within 3 days")
+    }
+
+    static func testSwapCapability() {
+        let data = try! Data(contentsOf: fixtureURL())
+        let payload = try! JSONDecoder().decode(StatusPayload.self, from: data)
+        let delegate = AppDelegate()
+        var account = payload.accounts[0]
+        account.provider = "fake"
+        account.capabilities = ["swap"]
+        let enabled = delegate.submenuSummary(account)
+        account.capabilities = []
+        let disabled = delegate.submenuSummary(account)
+
+        expect(enabled.contains("Swap to This Account"),
+               "swap capability enables account action")
+        expect(!disabled.contains("Swap to This Account"),
+               "missing swap capability hides account action")
     }
 }

@@ -6,8 +6,8 @@ An adapter is a module in this package declaring:
     AUTH     = util.AUTH_API_KEY          # how its credential is obtained
     def poll(conn, account, token): ...   # save one snapshot
 
-Adapters may also declare LOGIN, REFRESH, BROWSER_FLOW, CAPS, PLAN_LABEL and
-EXTRA hooks. Legacy providers continue to take precedence while they migrate.
+Adapters may also declare LOGIN, REFRESH, BROWSER_FLOW, CAPS, PLAN_LABEL,
+EXTRA and ACCOUNT_STATE hooks.
 
 Adapters exist so that adding a subscription is one new file rather than
 edits to oauth, poller, the limit_snapshots schema, status and
@@ -30,7 +30,7 @@ _errors: dict[str, str] = {}
 # Modules in this package that are support code, not adapters.
 _SKIP = {"util"}
 _CAPS = frozenset({"heartbeat", "swap"})
-_CALLABLE_HOOKS = ("LOGIN", "REFRESH", "PLAN_LABEL", "EXTRA")
+_CALLABLE_HOOKS = ("LOGIN", "REFRESH", "PLAN_LABEL", "EXTRA", "ACCOUNT_STATE")
 
 
 def register(mod: ModuleType) -> ModuleType:

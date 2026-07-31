@@ -163,6 +163,15 @@ def PLAN_LABEL(plan, item) -> tuple:
     return labels.get(p.lower(), (p or None, None))
 
 
+def ACCOUNT_STATE(item) -> dict:
+    sku = (item.get("sku") or item.get("access_sku") or "").lower()
+    subscription = "unknown"
+    if sku:
+        subscription = "free" if "free" in sku else "paid"
+    return {"subscription": subscription,
+            "renews_at": item.get("plan_reset")}
+
+
 def EXTRA(snap) -> dict:
     try:
         raw = json.loads(snap.get("raw_json") or "{}")

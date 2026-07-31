@@ -132,7 +132,7 @@ class RegistryTest(unittest.TestCase):
             providers.register(adapter)
 
     def test_optional_callable_hooks_are_validated(self):
-        for attr in ("LOGIN", "REFRESH", "PLAN_LABEL", "EXTRA"):
+        for attr in ("LOGIN", "REFRESH", "PLAN_LABEL", "EXTRA", "ACCOUNT_STATE"):
             with self.subTest(attr=attr):
                 adapter = fake_adapter(f"bad-{attr.lower()}", util.AUTH_OAUTH)
                 setattr(adapter, attr, "not callable")

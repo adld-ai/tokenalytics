@@ -97,6 +97,7 @@ struct Account: Codable, Identifiable {
     var github_email: String?
     var github_name: String?
     var tier_override: String?
+    var capabilities: [String]?
     var heartbeat_last_success: String?
     var usage_windows: [UsageWindow]?
     var windows: [WindowInfo]?

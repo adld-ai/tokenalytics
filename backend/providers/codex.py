@@ -13,6 +13,7 @@ from . import util
 PROVIDER = "codex"
 AUTH = util.AUTH_OAUTH
 CAPS = frozenset({"heartbeat", "swap"})
+RESET_CREDITS = True
 
 WHAM = "https://chatgpt.com/backend-api"
 CODEX = {
@@ -166,6 +167,17 @@ def PLAN_LABEL(plan, item) -> tuple:
         "enterprise": ("Enterprise", None),
     }
     return labels.get(p.lower(), (p.title() or None, None))
+
+
+def ACCOUNT_STATE(item) -> dict:
+    """Declare Codex subscription facts for status.account_state()."""
+    return {
+        "active": item.get("has_active_subscription"),
+        "gratis": item.get("is_active_subscription_gratis"),
+        "renews_at": item.get("renews_at"),
+        "expires_at": item.get("expires_at"),
+        "renews_soon": True,
+    }
 
 
 def EXTRA(snap) -> dict:

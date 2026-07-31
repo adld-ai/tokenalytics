@@ -19,6 +19,7 @@
     {
       "id": 101,
       "provider": "codex",
+      "capabilities": ["heartbeat", "swap"],
       "email": "codex@example.invalid",
       "plan": "plus",
       "status": "active",

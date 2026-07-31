@@ -8,10 +8,14 @@ STATUS_JSON = Path(os.environ.get("AGENT_POOL_STATUS_JSON",
                                     str(Path.home() / "solo/token-status-bar" / "secrets" / "status.json")))
 KST = zoneinfo.ZoneInfo("Asia/Seoul")
 HEARTBEAT_INTERVAL_S = 5 * 60 * 60
-HEARTBEAT_PROVIDERS = ("codex", "claude", "antigravity")
 # Mirrors poller.POLL_INTERVAL (poller imports status, so no import here).
 POLL_INTERVAL_S = int(os.environ.get("AGENT_POOL_POLL_INTERVAL", "300"))
 STALE_AFTER_S = 3 * POLL_INTERVAL_S
+
+
+def heartbeat_providers() -> tuple[str, ...]:
+    return tuple(name for name in providers.names()
+                 if "heartbeat" in providers.caps(name))
 
 
 def ts_fmt(ts) -> str:
@@ -164,7 +168,8 @@ def heartbeat_meta(conn, account_id) -> dict:
 
 
 def heartbeat_summary(items: list[dict]) -> dict:
-    hb_items = [i for i in items if i.get("provider") in HEARTBEAT_PROVIDERS]
+    selected = heartbeat_providers()
+    hb_items = [i for i in items if i.get("provider") in selected]
     if not hb_items:
         return {"status": "unknown", "next": None, "accounts": 0}
     failed = [i for i in hb_items if i.get("heartbeat_status") == "fail"]
@@ -507,8 +512,8 @@ def attach_projections(conn, account, windows, now=None):
             w["projected_exhaust_epoch"] = exhaust
 
 
-def codex_extra(conn, account_id) -> dict:
-    """Codex subscription metadata from ChatGPT account endpoints."""
+def subscription_extra(conn, account_id) -> dict:
+    """Subscription metadata recorded for an account, when available."""
     meta = store.get_subscription_meta(conn, account_id)
     if not meta:
         return {}
@@ -601,37 +606,30 @@ def account_state(item, now=None) -> dict:
     else:
         auth = "ok"
 
-    provider = item.get("provider")
     subscription, renews_dt, expires_dt = "unknown", None, None
-    if provider == "codex":
-        renews_dt = _parse_when(item.get("renews_at"))
-        expires_dt = _parse_when(item.get("expires_at"))
-        if item.get("has_active_subscription"):
-            subscription = "free" if item.get("is_active_subscription_gratis") else "paid"
-            if subscription == "paid" and renews_dt is not None and \
-                    0 <= (renews_dt - now_dt).total_seconds() <= SUB_RENEWS_SOON_S:
-                subscription = "renews_soon"
-        elif expires_dt is not None and expires_dt < now_dt:
-            subscription = "expired"
-    elif provider == "claude":
-        s = (item.get("subscription_status") or "").lower()
-        if s == "active":
-            subscription = "paid"
-        elif s in ("expired", "cancelled", "canceled", "past_due"):
-            subscription = "expired"
-        elif s == "free":
-            subscription = "free"
-        renews_dt = _parse_when(item.get("plan_reset"))
-    elif provider == "copilot":
-        sku = (item.get("sku") or item.get("access_sku") or "").lower()
-        if sku:
-            subscription = "free" if "free" in sku else "paid"
-        renews_dt = _parse_when(item.get("plan_reset"))
-    elif provider in ("xai", "devin", "antigravity"):
-        plan = (item.get("plan") or "").strip()
+    hook = providers.hook(item.get("provider"), "ACCOUNT_STATE")
+    declared = hook(item) if hook else {
+        "plan": item.get("plan"), "renews_at": item.get("plan_reset")}
+    if not isinstance(declared, dict):
+        declared = {}
+    renews_dt = _parse_when(declared.get("renews_at"))
+    expires_dt = _parse_when(declared.get("expires_at"))
+    if declared.get("subscription") in (
+            "paid", "free", "expired", "renews_soon", "unknown"):
+        subscription = declared["subscription"]
+    elif declared.get("active") is True:
+        subscription = "free" if declared.get("gratis") else "paid"
+    elif declared.get("active") is False and expires_dt is not None \
+            and expires_dt < now_dt:
+        subscription = "expired"
+    else:
+        plan = (declared.get("plan") or "").strip()
         if plan:
             subscription = "free" if plan.lower().startswith("free") else "paid"
-        renews_dt = _parse_when(item.get("plan_reset"))
+    if declared.get("renews_soon") and subscription == "paid" \
+            and renews_dt is not None \
+            and 0 <= (renews_dt - now_dt).total_seconds() <= SUB_RENEWS_SOON_S:
+        subscription = "renews_soon"
 
     windows = refresh_windows(item.get("windows") or [], now)
     fresh = [w for w in windows if not w.get("stale")]
@@ -708,7 +706,9 @@ def build_payload(conn) -> dict:
     for a in accounts:
         tok = store.get_token(conn, a["id"])
         snap = store.latest_snapshot(conn, a["id"])
-        credits = store.list_reset_credits(conn, a["id"]) if a["provider"] == "codex" else []
+        adapter = providers.get(a["provider"])
+        has_reset_credits = bool(getattr(adapter, "RESET_CREDITS", False))
+        credits = store.list_reset_credits(conn, a["id"]) if has_reset_credits else []
         items.append({
             "id": a["id"],
             "provider": a["provider"],
@@ -744,22 +744,18 @@ def build_payload(conn) -> dict:
                                 "expires_at": iso_fmt_exact(c["expires_at"]) or c["expires_at"],
                                 "granted_at": c.get("granted_at"),
                                 "description": c.get("description")} for c in credits]
-                              if a["provider"] == "codex" else None),
+                              if has_reset_credits else None),
             "last_poll": ts_fmt(snap["ts"]) if snap else None,
             # Raw epoch of the newest snapshot: should_swap's freshness rail
             # (spec §3.2) must not re-parse the KST-rendered last_poll string.
             "last_poll_epoch": float(snap["ts"]) if snap else None,
             "tier_override": a.get("tier_override"),
+            "capabilities": sorted(providers.caps(a["provider"])),
         })
-        if a["provider"] in HEARTBEAT_PROVIDERS:
+        if "heartbeat" in providers.caps(a["provider"]):
             items[-1].update(heartbeat_meta(conn, a["id"]))
-        if a["provider"] == "codex":
-            items[-1].update(codex_extra(conn, a["id"]))
-            items[-1].update(provider_extra(a["provider"], snap))
-        elif a["provider"] == "claude":
-            items[-1].update(provider_extra(a["provider"], snap))
-        elif a["provider"] in ("xai", "antigravity", "copilot", "devin"):
-            items[-1].update(provider_extra(a["provider"], snap))
+        items[-1].update(subscription_extra(conn, a["id"]))
+        items[-1].update(provider_extra(a["provider"], snap))
         name, price = plan_label(a["provider"], items[-1]["plan"], items[-1])
         items[-1]["plan"] = name
         items[-1]["plan_price"] = price

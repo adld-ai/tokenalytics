@@ -172,6 +172,20 @@ def PLAN_LABEL(plan, item) -> tuple:
     return labels.get(p.lower(), (p or None, None))
 
 
+def ACCOUNT_STATE(item) -> dict:
+    states = {
+        "active": "paid",
+        "expired": "expired",
+        "cancelled": "expired",
+        "canceled": "expired",
+        "past_due": "expired",
+        "free": "free",
+    }
+    raw = (item.get("subscription_status") or "").lower()
+    return {"subscription": states.get(raw, "unknown"),
+            "renews_at": item.get("plan_reset")}
+
+
 def EXTRA(snap) -> dict:
     """Export Claude subscription facts that are not declared windows."""
     out: dict = {}

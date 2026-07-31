@@ -1,6 +1,6 @@
 """Tests for windows[] normalization and headline selection."""
 from __future__ import annotations
-import json, os, sys, tempfile, time, unittest
+import json, os, sys, tempfile, time, types, unittest
 
 _TMP = tempfile.mkdtemp(prefix="tsb-test-")
 os.environ["AGENT_POOL_DB"] = os.path.join(_TMP, "pool.db")
@@ -9,12 +9,61 @@ os.environ["AGENT_POOL_HISTORY_DIR"] = os.path.join(_TMP, "history")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import status  # noqa: E402
+import providers, store  # noqa: E402
+from providers import util  # noqa: E402
 
 
 def snap(**kw):
     base = {"ts": 1000.0, "status": "active"}
     base.update(kw)
     return base
+
+
+class ProviderHookTest(unittest.TestCase):
+    def setUp(self):
+        providers.reset_cache()
+        self.addCleanup(providers.reset_cache)
+
+    def adapter(self):
+        adapter = types.ModuleType("providers.fake_status")
+        adapter.PROVIDER = "fake_status"
+        adapter.AUTH = util.AUTH_NONE
+        adapter.poll = lambda conn, account, token: None
+        return adapter
+
+    def test_registered_plan_label_hook_formats_plan(self):
+        adapter = self.adapter()
+        adapter.PLAN_LABEL = lambda plan, item: (f"Custom {plan}", "$7/mo")
+        adapter.EXTRA = lambda snap: {"custom_detail": "adapter"}
+        providers.register(adapter)
+
+        self.assertEqual(status.plan_label("fake_status", "Team", {}),
+                         ("Custom Team", "$7/mo"))
+        self.assertEqual(status.provider_extra("fake_status", {}),
+                         {"custom_detail": "adapter"})
+
+    def test_status_payload_exposes_registered_capabilities(self):
+        adapter = self.adapter()
+        adapter.CAPS = frozenset({"swap"})
+        providers.register(adapter)
+        conn = store.connect()
+        self.addCleanup(conn.close)
+        account_id = store.upsert_account(conn, "fake_status", "local", "fake")
+
+        item = next(item for item in status.build_payload(conn)["accounts"]
+                    if item["id"] == account_id)
+
+        self.assertEqual(item["capabilities"], ["swap"])
+
+    def test_registered_account_state_hook_classifies_subscription(self):
+        adapter = self.adapter()
+        adapter.ACCOUNT_STATE = lambda item: {"subscription": "paid"}
+        providers.register(adapter)
+        item = {"provider": "fake_status", "status": "active",
+                "token_expired": False, "windows": []}
+
+        self.assertEqual(status.account_state(item, now=1_000)["subscription"],
+                         "paid")
 
 
 class NormalizeWindowsTest(unittest.TestCase):

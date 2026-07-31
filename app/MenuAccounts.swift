@@ -104,7 +104,8 @@ extension AppDelegate {
         let heartbeat = heartbeatRows(acct)
         rows.append(contentsOf: heartbeat)
         if !heartbeat.isEmpty { rows.append(.separator) }
-        if acct.provider == "codex", acct.state?.usable == true {
+        if acct.capabilities?.contains("swap") == true,
+           acct.state?.usable == true {
             rows.append(.swapAction(t("swap_to_agent")))
         }
         rows.append(.reconnectAction(t("reconnect_agent")))
