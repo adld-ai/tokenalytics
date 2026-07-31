@@ -67,11 +67,6 @@ struct Account: Codable, Identifiable {
     var secondary_status: String?
     var binding_window: String?
     var overage_status: String?
-    // Claude Fable model-scoped weekly window (separate weekly limit)
-    var fable_used_pct: Double?
-    var fable_reset: String?
-    var fable_label: String?
-    var fable_status: String?
     // Grok / Antigravity / Copilot / Devin subscription details
     var credits_used: Double?
     var credits_limit: Double?

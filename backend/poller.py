@@ -1,14 +1,4 @@
-"""Poller — hits limit endpoints for every account (adaptive: 300s base,
-60s hot / 180s hot-claude, pre-reset capture near known boundaries).
-
-Limit sources:
-  claude:       api.anthropic.com/api/oauth/usage (five_hour/seven_day/limits[])
-  copilot:      api.github.com/copilot_internal/user (quota_snapshots.premium_interactions)
-
-The providers listed above predate the adapter registry and stay hand-written
-here. Migrated and newer providers live in backend/providers/ and reach this
-module through resolve_poller(); see that package's docstring.
-"""
+"""Poll every provider through its adapter with an adaptive cadence."""
 from __future__ import annotations
 import json, os, re, sys, time, datetime, urllib.request, urllib.error
 import providers, store, oauth, window_history, work_queue
@@ -77,13 +67,6 @@ def _send_with_retry(req, timeout):
     return st, body, hdrs
 
 
-def _get(url, headers, timeout=15):
-    req = urllib.request.Request(url, method="GET")
-    for k, v in (headers or {}).items():
-        req.add_header(k, v)
-    return _send_with_retry(req, timeout)
-
-
 def _post(url, data, headers, timeout=15):
     body = json.dumps(data).encode()
     req = urllib.request.Request(url, data=body, method="POST")
@@ -93,133 +76,8 @@ def _post(url, data, headers, timeout=15):
     return _send_with_retry(req, timeout)
 
 
-# ─── Claude oauth/usage ────────────────────────────────────────────────────
-CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
-
-
-def poll_claude(conn, account, token):
-    """Poll Claude via the quota-free oauth/usage endpoint (no probes)."""
-    def _fetch(access_token):
-        return _get(CLAUDE_USAGE_URL, {
-            "Authorization": f"Bearer {access_token}",
-            "anthropic-version": "2023-06-01",
-            "anthropic-beta": "oauth-2025-04-20",
-        })
-
-    st, body, _ = _fetch(token["access_token"])
-    if st == 401 and token.get("refresh_token"):
-        # One refresh + retry; a second 401 becomes an error snapshot.
-        # The lock serializes rotating-refresh-token use across processes.
-        try:
-            with work_queue.exclusive("token_refresh"):
-                latest = store.get_token(conn, account["id"]) or token
-                if latest["access_token"] != token["access_token"]:
-                    # Another process already refreshed while we waited.
-                    token = latest
-                else:
-                    result = oauth.refresh_claude(token["refresh_token"])
-                    store.save_token(conn, account["id"], result["access_token"],
-                                     result.get("refresh_token"), result.get("id_token"),
-                                     result.get("expires_at"), result.get("raw"))
-                    store.log_event(conn, account["id"], "token_refresh", True, "")
-                    token = store.get_token(conn, account["id"])
-            st, body, _ = _fetch(token["access_token"])
-        except Exception as e:
-            store.log_event(conn, account["id"], "token_refresh", False, str(e))
-
-    if st != 200 or not isinstance(body, dict):
-        snap = {"status": "error",
-                "status_message": f"oauth/usage HTTP {st}: {str(body)[:120]}"}
-    else:
-        snap = _claude_usage_snap(body, _claude_profile(token))
-    store.save_snapshot(conn, account["id"], snap)
-    store.log_event(conn, account["id"], "limit_poll", snap["status"] == "active",
-                    snap.get("status_message", ""))
-
-
-def _claude_usage_snap(body, profile):
-    """Build a snapshot from the oauth/usage response body (pure function)."""
-    snap = {"status": "active", "status_message": ""}
-    rj = {"usage_api": body}
-    if profile:
-        rj["profile"] = profile
-        if profile.get("plan"):
-            snap["plan"] = profile["plan"]
-
-    fh = body.get("five_hour") or {}
-    if fh.get("utilization") is not None:
-        snap["primary_used_pct"] = float(fh["utilization"])
-        snap["primary_window_s"] = 18000
-        reset = window_history._parse_iso_ts(fh.get("resets_at"))
-        if reset:
-            snap["primary_reset_at"] = reset
-    sd = body.get("seven_day") or {}
-    if sd.get("utilization") is not None:
-        snap["secondary_used_pct"] = float(sd["utilization"])
-        snap["secondary_window_s"] = 604800
-        reset = window_history._parse_iso_ts(sd.get("resets_at"))
-        if reset:
-            snap["secondary_reset_at"] = reset
-
-    limits = [l for l in (body.get("limits") or []) if isinstance(l, dict)]
-    for lim in limits:
-        if lim.get("kind") != "weekly_scoped":
-            continue
-        scope_model = ((lim.get("scope") or {}).get("model") or {})
-        rj["fable"] = {
-            "label": scope_model.get("display_name") or "scoped",
-            "used_pct": float(lim["percent"]) if lim.get("percent") is not None else None,
-            "reset_at": window_history._parse_iso_ts(lim.get("resets_at")),
-            "status": lim.get("severity"),
-        }
-        break
-
-    active = next((l for l in limits if l.get("is_active")), None)
-    snap["rate_limit_remaining"] = (active or {}).get("severity") or "normal"
-    snap["rate_limit_limit"] = "unified"
-    if snap.get("primary_reset_at"):
-        snap["rate_limit_reset"] = str(snap["primary_reset_at"])
-    snap["raw_json"] = json.dumps(rj)
-    return snap
-
-
-def _claude_profile(token):
-    """Fetch Claude subscription/account profile via the OAuth profile endpoint."""
-    try:
-        st, body, _ = _get("https://api.anthropic.com/api/oauth/profile", {
-            "Authorization": f"Bearer {token['access_token']}",
-            "anthropic-version": "2023-06-01",
-        })
-    except Exception:
-        return None
-    if st != 200 or not isinstance(body, dict):
-        return None
-    acct = body.get("account") or {}
-    org = body.get("organization") or {}
-    if acct.get("has_claude_max"):
-        plan = "Claude Max"
-    elif acct.get("has_claude_pro"):
-        plan = "Claude Pro"
-    else:
-        ot = org.get("organization_type") or ""
-        plan = ot.replace("_", " ").title() or None
-    return {
-        "plan": plan,
-        "subscription_status": org.get("subscription_status"),
-        "billing_type": org.get("billing_type"),
-        "rate_limit_tier": org.get("rate_limit_tier"),
-        "extra_usage_enabled": org.get("has_extra_usage_enabled"),
-        "subscription_created_at": org.get("subscription_created_at"),
-        "organization_type": org.get("organization_type"),
-        "display_name": acct.get("display_name"),
-        "full_name": acct.get("full_name"),
-        "org_name": org.get("name"),
-        "member_since": acct.get("created_at"),
-    }
 # ─── dispatch ──────────────────────────────────────────────────────────────
-POLLERS = {
-    "claude": poll_claude,
-}
+POLLERS = {}
 
 
 def resolve_poller(provider):

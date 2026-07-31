@@ -1,4 +1,4 @@
-"""Tests for the Claude oauth/usage snapshot parser."""
+"""Tests for the Claude provider adapter."""
 from __future__ import annotations
 import datetime, json, os, sys, tempfile, time, unittest
 from unittest import mock
@@ -9,9 +9,8 @@ os.environ["AGENT_POOL_STATUS_JSON"] = os.path.join(_TMP, "status.json")
 os.environ["AGENT_POOL_HISTORY_DIR"] = os.path.join(_TMP, "history")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import poller  # noqa: E402
-import status  # noqa: E402
 import store  # noqa: E402
+from providers import claude  # noqa: E402
 
 FIXTURE = {
     "five_hour": {"utilization": 41.0, "resets_at": "2026-07-16T13:59:59.819914+00:00",
@@ -37,18 +36,22 @@ FIXTURE = {
 
 class ClaudeUsageSnapTest(unittest.TestCase):
     def test_primary_secondary_windows(self):
-        snap = poller._claude_usage_snap(FIXTURE, None)
+        snap = claude.to_snapshot({"usage": FIXTURE})
         self.assertEqual(snap["status"], "active")
-        self.assertEqual(snap["primary_used_pct"], 41.0)
-        self.assertEqual(snap["primary_window_s"], 18000)
+        windows = {
+            window["kind"]: window
+            for window in json.loads(snap["raw_json"])["windows"]
+        }
+        self.assertEqual(windows["5h"]["used_pct"], 41.0)
+        self.assertEqual(windows["5h"]["window_s"], 18000)
         expected = datetime.datetime.fromisoformat(
             "2026-07-16T13:59:59.819914+00:00").timestamp()
-        self.assertAlmostEqual(snap["primary_reset_at"], expected, places=3)
-        self.assertEqual(snap["secondary_used_pct"], 5.0)
-        self.assertEqual(snap["secondary_window_s"], 604800)
+        self.assertAlmostEqual(windows["5h"]["reset_at"], expected, places=3)
+        self.assertEqual(windows["weekly"]["used_pct"], 5.0)
+        self.assertEqual(windows["weekly"]["window_s"], 604800)
 
     def test_fable_window_from_weekly_scoped(self):
-        snap = poller._claude_usage_snap(FIXTURE, None)
+        snap = claude.to_snapshot({"usage": FIXTURE})
         rj = json.loads(snap["raw_json"])
         self.assertEqual(rj["fable"]["label"], "Fable")
         self.assertEqual(rj["fable"]["used_pct"], 9.0)
@@ -56,28 +59,37 @@ class ClaudeUsageSnapTest(unittest.TestCase):
         self.assertIsNotNone(rj["fable"]["reset_at"])
 
     def test_raw_json_keeps_full_body_and_profile(self):
-        snap = poller._claude_usage_snap(FIXTURE, {"plan": "Claude Max"})
+        snap = claude.to_snapshot({
+            "usage": FIXTURE,
+            "profile": {"plan": "Claude Max"},
+        })
         rj = json.loads(snap["raw_json"])
         self.assertEqual(rj["usage_api"]["five_hour"]["utilization"], 41.0)
         self.assertEqual(rj["profile"]["plan"], "Claude Max")
         self.assertEqual(snap["plan"], "Claude Max")
 
     def test_binding_and_severity_fields(self):
-        snap = poller._claude_usage_snap(FIXTURE, None)
-        self.assertEqual(snap["rate_limit_remaining"], "normal")
-        self.assertEqual(snap["rate_limit_limit"], "unified")
+        snap = claude.to_snapshot({"usage": FIXTURE})
+        out = claude.EXTRA(snap)
+        self.assertEqual(out["rate_limit_remaining"], "normal")
+        self.assertEqual(out["rate_limit_limit"], "unified")
 
     def test_missing_windows_do_not_crash(self):
-        snap = poller._claude_usage_snap({"limits": []}, None)
+        snap = claude.to_snapshot({"usage": {"limits": []}})
         self.assertEqual(snap["status"], "active")
-        self.assertNotIn("primary_used_pct", snap)
+        self.assertEqual(json.loads(snap["raw_json"])["windows"], [])
 
 
 class ClaudeExtraUsageApiTest(unittest.TestCase):
     def test_claude_extra_reads_usage_api(self):
-        snap = poller._claude_usage_snap(FIXTURE, {"plan": "Claude Max",
-                                                   "subscription_status": "active"})
-        out = status.claude_extra(snap)
+        snap = claude.to_snapshot({
+            "usage": FIXTURE,
+            "profile": {
+                "plan": "Claude Max",
+                "subscription_status": "active",
+            },
+        })
+        out = claude.EXTRA(snap)
         self.assertEqual(out["fable_label"], "Fable")
         self.assertEqual(out["fable_used_pct"], 9.0)
         self.assertEqual(out["primary_status"], "normal")
@@ -86,7 +98,7 @@ class ClaudeExtraUsageApiTest(unittest.TestCase):
 
 
 class ClaudePoll401RefreshTest(unittest.TestCase):
-    """poll_claude's 401 → refresh → retry branch (auth-critical DB side effects)."""
+    """Claude's 401 refresh retry branch and auth-critical DB side effects."""
 
     def setUp(self):
         self.conn = store.connect()
@@ -111,7 +123,7 @@ class ClaudePoll401RefreshTest(unittest.TestCase):
         # 401 on the stale token, 200 on the refreshed one; profile is
         # best-effort so a non-200 there must not fail the poll.
         def fake_get(url, headers, timeout=15):
-            if url != poller.CLAUDE_USAGE_URL:
+            if url != claude.CLAUDE_USAGE_URL:
                 return 404, "", {}
             if headers["Authorization"] == "Bearer old-access":
                 return 401, {"error": "token expired"}, {}
@@ -121,14 +133,15 @@ class ClaudePoll401RefreshTest(unittest.TestCase):
         refreshed = {"access_token": "new-access", "refresh_token": "new-refresh",
                      "id_token": "", "expires_at": time.time() + 3600, "raw": {}}
         token = store.get_token(self.conn, self.account["id"])
-        with mock.patch.object(poller, "_get", side_effect=fake_get), \
-             mock.patch.object(poller.oauth, "refresh_claude",
+        with mock.patch.object(claude, "_get", side_effect=fake_get), \
+             mock.patch.object(claude, "REFRESH",
                                return_value=refreshed) as refresh:
-            poller.poll_claude(self.conn, self.account, token)
+            claude.poll(self.conn, self.account, token)
         refresh.assert_called_once_with("refresh-tok")
         snap = store.latest_snapshot(self.conn, self.account["id"])
         self.assertEqual(snap["status"], "active")
-        self.assertEqual(snap["primary_used_pct"], 41.0)
+        windows = json.loads(snap["raw_json"])["windows"]
+        self.assertEqual(windows[0]["used_pct"], 41.0)
         saved = store.get_token(self.conn, self.account["id"])
         self.assertEqual(saved["access_token"], "new-access")
         self.assertEqual(saved["refresh_token"], "new-refresh")
@@ -146,10 +159,10 @@ class ClaudePoll401RefreshTest(unittest.TestCase):
             return 401, {"error": "token expired"}, {}
 
         token = store.get_token(self.conn, self.account["id"])
-        with mock.patch.object(poller, "_get", side_effect=fake_get), \
-             mock.patch.object(poller.oauth, "refresh_claude",
+        with mock.patch.object(claude, "_get", side_effect=fake_get), \
+             mock.patch.object(claude, "REFRESH",
                                side_effect=RuntimeError("refresh boom")):
-            poller.poll_claude(self.conn, self.account, token)
+            claude.poll(self.conn, self.account, token)
         snap = store.latest_snapshot(self.conn, self.account["id"])
         self.assertEqual(snap["status"], "error")
         self.assertIn("HTTP 401", snap["status_message"])

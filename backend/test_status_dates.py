@@ -9,6 +9,7 @@ os.environ["AGENT_POOL_STATUS_JSON"] = os.path.join(_TMP, "status.json")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import status  # noqa: E402
+from providers import claude  # noqa: E402
 
 UTC = datetime.timezone.utc
 
@@ -61,7 +62,7 @@ class WiringTests(unittest.TestCase):
         snap = {"raw_json": json.dumps({"profile": {
             "subscription_created_at": "2025-03-15T09:30:00Z",
         }})}
-        out = status.claude_extra(snap)
+        out = claude.EXTRA(snap)
         self.assertIn("plan_reset", out)
         # Formatted as "YYYY-MM-DD HH:MM" KST-local, day 15.
         self.assertRegex(out["plan_reset"], r"^\d{4}-\d{2}-15 \d{2}:\d{2}$")

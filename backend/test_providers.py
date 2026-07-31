@@ -15,7 +15,7 @@ os.environ["AGENT_POOL_HISTORY_DIR"] = os.path.join(_TMP, "history")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import providers  # noqa: E402
-from providers import util  # noqa: E402
+from providers import claude, util  # noqa: E402
 import oauth  # noqa: E402
 import status  # noqa: E402
 import store  # noqa: E402
@@ -112,16 +112,18 @@ class RegistryTest(unittest.TestCase):
         self.assertEqual(providers.caps("codex"),
                          frozenset({"heartbeat", "swap"}))
 
-    def test_legacy_oauth_hooks_override_adapter_hooks(self):
-        legacy_login = oauth.resolve_login("claude")
-        legacy_refresh = oauth.resolve_refresh("claude")
-        adapter = fake_adapter("claude", util.AUTH_OAUTH)
-        adapter.LOGIN = lambda incognito=False: None
-        adapter.REFRESH = lambda token: None
-        providers.register(adapter)
+    def test_claude_declares_oauth_heartbeat_and_swap_hooks(self):
+        self.assertEqual(providers.caps("claude"),
+                         frozenset({"heartbeat", "swap"}))
+        self.assertIs(oauth.resolve_login("claude"), claude.LOGIN)
+        self.assertIs(oauth.resolve_refresh("claude"), claude.REFRESH)
+        self.assertIs(oauth.resolve_browser_flow("claude"),
+                      claude.BROWSER_FLOW)
 
-        self.assertIs(oauth.resolve_login("claude"), legacy_login)
-        self.assertIs(oauth.resolve_refresh("claude"), legacy_refresh)
+    def test_legacy_oauth_tables_are_empty(self):
+        self.assertEqual(oauth.LOGIN_FUNCS, {})
+        self.assertEqual(oauth.REFRESH_FUNCS, {})
+        self.assertEqual(oauth.BROWSER_FLOWS, {})
 
     def test_adapter_with_unknown_capability_is_rejected(self):
         adapter = fake_adapter("future", util.AUTH_OAUTH)

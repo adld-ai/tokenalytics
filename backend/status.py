@@ -251,77 +251,6 @@ def cmd_status(conn) -> int:
     return 0
 
 
-def claude_extra(snap) -> dict:
-    """Extra Claude subscription + window-status fields parsed from raw_json."""
-    out: dict = {}
-    if not snap or not snap.get("raw_json"):
-        return out
-    try:
-        rj = json.loads(snap["raw_json"])
-    except Exception:
-        return out
-    if not isinstance(rj, dict):
-        return out
-    prof = rj.get("profile") or {}
-    rl = rj.get("ratelimit") or {}
-    fable = rj.get("fable") or {}
-    if fable:
-        if fable.get("used_pct") is not None:
-            out["fable_used_pct"] = fable["used_pct"]
-        if fable.get("reset_at") is not None:
-            out["fable_reset"] = ts_fmt(fable["reset_at"])
-        if fable.get("label"):
-            out["fable_label"] = fable["label"]
-        if fable.get("status"):
-            out["fable_status"] = fable["status"]
-    if prof:
-        out["subscription_status"] = prof.get("subscription_status")
-        out["billing_type"] = prof.get("billing_type")
-        out["rate_limit_tier"] = prof.get("rate_limit_tier")
-        out["extra_usage_enabled"] = prof.get("extra_usage_enabled")
-        out["subscription_created"] = iso_fmt(prof.get("subscription_created_at"))
-        out["plan_start"] = iso_fmt(prof.get("subscription_created_at"))
-        anniversary = next_monthly_anniversary(prof.get("subscription_created_at"))
-        if anniversary:
-            out["plan_reset"] = anniversary.astimezone(KST).strftime("%Y-%m-%d %H:%M")
-        out["member_since"] = iso_fmt(prof.get("member_since"))
-        out["display_name"] = prof.get("display_name")
-        out["org_name"] = prof.get("org_name")
-    usage = rj.get("usage_api") or {}
-    limits = [l for l in (usage.get("limits") or []) if isinstance(l, dict)]
-    if limits:
-        by_kind = {l.get("kind"): l for l in limits}
-        if by_kind.get("session"):
-            out["primary_status"] = by_kind["session"].get("severity")
-        if by_kind.get("weekly_all"):
-            out["secondary_status"] = by_kind["weekly_all"].get("severity")
-        active = next((l for l in limits if l.get("is_active")), None)
-        if active:
-            label = {"session": "5h", "weekly_all": "weekly"}.get(active.get("kind"))
-            if label is None:
-                scope_model = ((active.get("scope") or {}).get("model") or {})
-                label = scope_model.get("display_name") or active.get("kind")
-            out["binding_window"] = label
-        extra = usage.get("extra_usage") or {}
-        if extra.get("is_enabled"):
-            out["extra_usage_enabled"] = True
-            if extra.get("utilization") is not None:
-                out["extra_usage_used_pct"] = float(extra["utilization"])
-    elif rl:
-        out["primary_status"] = rl.get("anthropic-ratelimit-unified-5h-status")
-        out["secondary_status"] = rl.get("anthropic-ratelimit-unified-7d-status")
-        fallback_pct = rl.get("anthropic-ratelimit-unified-fallback-percentage")
-        if fallback_pct is not None:
-            try:
-                out["fallback_used_pct"] = float(fallback_pct) * 100
-            except (TypeError, ValueError):
-                pass
-        claim = rl.get("anthropic-ratelimit-unified-representative-claim")
-        out["binding_window"] = {"five_hour": "5h", "seven_day": "weekly"}.get(claim, claim)
-        out["overage_status"] = rl.get("anthropic-ratelimit-unified-overage-status")
-    return {k: v for k, v in out.items() if v is not None}
-
-
 def provider_extra(provider, snap) -> dict:
     """Extra subscription fields parsed from a snapshot's raw_json['extra']."""
     hook = providers.hook(provider, "EXTRA")
@@ -684,9 +613,6 @@ def plan_label(provider, plan, item) -> tuple:
     if hook:
         return hook(plan, item)
     p = (plan or "").strip()
-    if provider == "claude":
-        m = {"claude pro": ("Claude Pro", "$20/mo"), "claude max": ("Claude Max", "$100/mo")}
-        return m.get(p.lower(), (p or None, None))
     return (p or None, None)
 
 
@@ -900,7 +826,7 @@ def build_payload(conn) -> dict:
             items[-1].update(codex_extra(conn, a["id"]))
             items[-1].update(provider_extra(a["provider"], snap))
         elif a["provider"] == "claude":
-            items[-1].update(claude_extra(snap))
+            items[-1].update(provider_extra(a["provider"], snap))
         elif a["provider"] in ("xai", "antigravity", "copilot", "devin"):
             items[-1].update(provider_extra(a["provider"], snap))
         name, price = plan_label(a["provider"], items[-1]["plan"], items[-1])

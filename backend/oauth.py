@@ -1,4 +1,4 @@
-"""Shared OAuth helpers and the remaining legacy provider flows.
+"""Shared OAuth helpers and adapter-registry resolution.
 
 Each provider function returns a dict with:
   access_token, refresh_token, id_token, expires_at (epoch s), account_id, email, plan, raw
@@ -225,92 +225,10 @@ def decode_jwt_payload(token: str) -> dict:
         return {}
 
 
-# ─── Claude (Anthropic) ────────────────────────────────────────────────────
-CLAUDE = {
-    "auth_url": "https://claude.ai/oauth/authorize",
-    "token_url": "https://api.anthropic.com/v1/oauth/token",
-    "client_id": "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
-    "scope": "user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload",
-    "port": 54545,
-}
-
-
-def login_claude(incognito: bool = False) -> dict:
-    verifier, challenge = gen_pkce()
-    state = gen_state()
-    redirect = f"http://localhost:{CLAUDE['port']}/callback"
-    params = {
-        "code": "true",
-        "client_id": CLAUDE["client_id"],
-        "response_type": "code",
-        "redirect_uri": redirect,
-        "scope": CLAUDE["scope"],
-        "state": state,
-        "code_challenge": challenge,
-        "code_challenge_method": "S256",
-    }
-    auth_url = f"{CLAUDE['auth_url']}?{urllib.parse.urlencode(params)}"
-    open_browser(auth_url, incognito)
-    print(f"Waiting for Claude callback on port {CLAUDE['port']}...")
-    result = wait_for_callback(CLAUDE["port"], host="localhost", path="/callback")
-    if result.get("error"):
-        raise RuntimeError(f"Claude OAuth error: {result.get('error_description', result['error'])}")
-    if result.get("state") != state:
-        raise RuntimeError("Claude OAuth state mismatch")
-    st, tok = http_post_json(CLAUDE["token_url"], {
-        "grant_type": "authorization_code",
-        "client_id": CLAUDE["client_id"],
-        "code": result["code"],
-        "state": state,
-        "redirect_uri": redirect,
-        "code_verifier": verifier,
-    }, {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"})
-    if st != 200:
-        raise RuntimeError(f"Claude token exchange failed: {st} {tok}")
-    # Extract email + account_id from the token response
-    email = ""
-    account_id = ""
-    if isinstance(tok, dict):
-        acct = tok.get("account") or {}
-        email = acct.get("email_address", "")
-        account_id = acct.get("uuid", "")
-    return {
-        "access_token": tok["access_token"],
-        "refresh_token": tok.get("refresh_token"),
-        "id_token": tok.get("id_token", ""),
-        "expires_at": time.time() + tok.get("expires_in", 3600),
-        "account_id": account_id,
-        "email": email,
-        "plan": "",
-        "raw": tok,
-    }
-
-
-def refresh_claude(refresh_token: str) -> dict:
-    st, tok = http_post_json(CLAUDE["token_url"], {
-        "grant_type": "refresh_token",
-        "client_id": CLAUDE["client_id"],
-        "refresh_token": refresh_token,
-    }, {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"})
-    if st != 200:
-        raise RuntimeError(f"Claude refresh failed: {st} {tok}")
-    return {
-        "access_token": tok["access_token"],
-        "refresh_token": tok.get("refresh_token", refresh_token),
-        "id_token": tok.get("id_token", ""),
-        "expires_at": time.time() + tok.get("expires_in", 3600),
-        "raw": tok,
-    }
-
-
 # ─── registry ──────────────────────────────────────────────────────────────
-LOGIN_FUNCS = {
-    "claude": login_claude,
-}
+LOGIN_FUNCS = {}
 
-REFRESH_FUNCS = {
-    "claude": refresh_claude,
-}
+REFRESH_FUNCS = {}
 
 PROVIDERS = list(LOGIN_FUNCS.keys())
 
@@ -346,58 +264,9 @@ def known_providers():
 # is described declaratively so the flow manager owns the state machine
 # (listener + CSRF + background exchange) instead of every provider function.
 
-def _authorize_claude(state: str, challenge: str) -> str:
-    redirect = f"http://localhost:{CLAUDE['port']}/callback"
-    params = {
-        "code": "true",
-        "client_id": CLAUDE["client_id"],
-        "response_type": "code",
-        "redirect_uri": redirect,
-        "scope": CLAUDE["scope"],
-        "state": state,
-        "code_challenge": challenge,
-        "code_challenge_method": "S256",
-    }
-    return f"{CLAUDE['auth_url']}?{urllib.parse.urlencode(params)}"
-
-
-def _exchange_claude(code: str, state: str, verifier: str) -> dict:
-    redirect = f"http://localhost:{CLAUDE['port']}/callback"
-    ua = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-          "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
-    st, tok = http_post_json(CLAUDE["token_url"], {
-        "grant_type": "authorization_code",
-        "client_id": CLAUDE["client_id"],
-        "code": code,
-        "state": state,
-        "redirect_uri": redirect,
-        "code_verifier": verifier,
-    }, {"User-Agent": ua})
-    if st != 200:
-        raise RuntimeError(f"Claude token exchange failed: {st} {tok}")
-    email, account_id = "", ""
-    if isinstance(tok, dict):
-        acct = tok.get("account") or {}
-        email = acct.get("email_address", "")
-        account_id = acct.get("uuid", "")
-    return {
-        "access_token": tok["access_token"],
-        "refresh_token": tok.get("refresh_token"),
-        "id_token": tok.get("id_token", ""),
-        "expires_at": time.time() + tok.get("expires_in", 3600),
-        "account_id": account_id,
-        "email": email,
-        "plan": "",
-        "raw": tok,
-    }
-
-
 # Each spec: which loopback (host/port/path) to advertise, whether the flow uses
 # PKCE, and the authorize-URL + token-exchange callables above.
-BROWSER_FLOWS: dict[str, dict] = {
-    "claude": {"host": "localhost", "port": CLAUDE["port"], "path": "/callback",
-               "pkce": True, "authorize": _authorize_claude, "exchange": _exchange_claude},
-}
+BROWSER_FLOWS: dict[str, dict] = {}
 
 
 def resolve_browser_flow(provider):

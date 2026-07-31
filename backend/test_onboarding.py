@@ -24,7 +24,7 @@ os.environ["AGENT_POOL_STATUS_JSON"] = str(Path(_TMP) / "status.json")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import providers, store, oauth, poller, pool, status  # noqa: E402
-from providers import antigravity, codex, copilot, devin, util, xai  # noqa: E402
+from providers import antigravity, claude, codex, copilot, devin, util, xai  # noqa: E402
 
 
 def _iso(ts):
@@ -228,9 +228,10 @@ class OnboardingPollTests(unittest.TestCase):
 
     # Helper: run onboarding for a provider and return the saved snapshot.
     def _onboard(self, provider):
-        if provider in ("antigravity", "codex", "copilot", "xai"):
+        if provider in ("antigravity", "claude", "codex", "copilot", "xai"):
             adapter = {
                 "antigravity": antigravity,
+                "claude": claude,
                 "codex": codex,
                 "copilot": copilot,
                 "xai": xai,
@@ -326,12 +327,19 @@ class OnboardingPollTests(unittest.TestCase):
 
     def test_claude_subscription_data(self):
         _, snap = self._onboard("claude")
-        for f in ("plan", "primary_used_pct", "primary_reset_at", "primary_window_s",
-                  "secondary_used_pct", "secondary_reset_at", "secondary_window_s",
-                  "rate_limit_remaining", "rate_limit_limit"):
-            self.assertIsNotNone(snap[f], f"claude snapshot missing {f}")
-        # profile must be merged into raw_json
+        self.assertEqual(snap["plan"], "Claude Max")
         rj = json.loads(snap["raw_json"])
+        windows = {window["kind"]: window for window in rj["windows"]}
+        self.assertEqual(windows["5h"]["used_pct"], 7.0)
+        self.assertEqual(windows["5h"]["window_s"], 18000)
+        self.assertIsNotNone(windows["5h"].get("reset_at"))
+        self.assertEqual(windows["weekly"]["used_pct"], 20.0)
+        self.assertEqual(windows["weekly"]["window_s"], 604800)
+        self.assertIsNotNone(windows["weekly"].get("reset_at"))
+        exported = claude.EXTRA(snap)
+        self.assertEqual(exported["rate_limit_remaining"], "normal")
+        self.assertEqual(exported["rate_limit_limit"], "unified")
+        # Profile must still be merged into raw_json.
         self.assertEqual(rj["profile"]["plan"], "Claude Max")
 
     def test_xai_subscription_data(self):

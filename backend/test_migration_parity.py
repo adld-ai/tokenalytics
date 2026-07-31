@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import status  # noqa: E402
 import window_history  # noqa: E402
-from providers import antigravity, codex, copilot, devin, xai  # noqa: E402
+from providers import antigravity, claude, codex, copilot, devin, xai  # noqa: E402
 
 
 GOLDEN_DIR = os.path.join(os.path.dirname(__file__), "fixtures", "golden")
@@ -158,6 +158,30 @@ class ClaudeParityTest(ParityCase):
                       "reset_at": 3000.0, "status": "normal"},
         }),
     )
+
+    def adapter_snapshot(self):
+        return claude.to_snapshot({
+            "usage": {
+                "five_hour": {
+                    "utilization": 41.0,
+                    "resets_at": "1970-01-01T00:33:20+00:00",
+                },
+                "seven_day": {
+                    "utilization": 5.0,
+                    "resets_at": "1970-01-01T00:50:00+00:00",
+                },
+                "limits": [
+                    {"kind": "session", "percent": 41,
+                     "severity": "normal", "is_active": True},
+                    {"kind": "weekly_all", "percent": 5,
+                     "severity": "normal", "is_active": False},
+                    {"kind": "weekly_scoped", "percent": 9,
+                     "severity": "normal",
+                     "resets_at": "1970-01-01T00:50:00+00:00",
+                     "scope": {"model": {"display_name": "Fable"}}},
+                ],
+            },
+        })
 
 
 class XaiParityTest(ParityCase):

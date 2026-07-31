@@ -258,11 +258,6 @@ extension AppDelegate {
         if let message = acct.status_message, !message.isEmpty {
             lines.append(L10n.label("status", message))
         }
-        if acct.provider == "claude",
-           !(acct.windows ?? []).contains(where: { $0.kind == "model_weekly" }),
-           let status = acct.fable_status, !status.isEmpty {
-            lines.append("\(L10n.tr("fable_limit")): \(L10n.tr("fable_\(status)"))")
-        }
         if acct.provider == "copilot" {
             if let sku = acct.access_sku { lines.append(L10n.label("sku", sku)) }
             if let quota = acct.rate_limit_limit {

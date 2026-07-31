@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import poller  # noqa: E402
 import providers  # noqa: E402
 import store  # noqa: E402
-from providers import codex  # noqa: E402
+from providers import claude, codex  # noqa: E402
 from providers import util  # noqa: E402
 
 
@@ -36,6 +36,12 @@ class ResolvePollerTest(unittest.TestCase):
     def test_migrated_codex_resolves_from_adapter(self):
         self.assertIs(poller.resolve_poller("codex"), codex.poll)
 
+    def test_migrated_claude_resolves_from_adapter(self):
+        self.assertIs(poller.resolve_poller("claude"), claude.poll)
+
+    def test_legacy_poller_table_is_empty(self):
+        self.assertEqual(poller.POLLERS, {})
+
     def test_adapter_resolves(self):
         fn = lambda conn, account, token: None  # noqa: E731
         providers.register(adapter("kimi", util.AUTH_API_KEY, fn))
@@ -47,8 +53,8 @@ class ResolvePollerTest(unittest.TestCase):
     def test_legacy_pollers_win_over_an_adapter_of_the_same_name(self):
         """test doubles patch POLLERS; that must keep working."""
         fn = lambda conn, account, token: None  # noqa: E731
-        providers.register(adapter("claude", util.AUTH_API_KEY, fn))
-        self.assertIs(poller.resolve_poller("claude"), poller.poll_claude)
+        with mock.patch.dict(poller.POLLERS, {"claude": fn}):
+            self.assertIs(poller.resolve_poller("claude"), fn)
 
 
 class TokenGateTest(unittest.TestCase):
