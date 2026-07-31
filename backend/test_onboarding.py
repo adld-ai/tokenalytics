@@ -11,7 +11,7 @@ For each provider this asserts two things:
 Run:  python test_onboarding.py
 """
 from __future__ import annotations
-import datetime, json, os, sys, tempfile, time, unittest
+import datetime, json, os, sys, tempfile, time, types, unittest
 import urllib.request
 from pathlib import Path
 from unittest import mock
@@ -250,6 +250,25 @@ class OnboardingPollTests(unittest.TestCase):
         snap = store.latest_snapshot(self.conn, acct["id"])
         self.assertIsNotNone(snap, f"no snapshot saved for {provider}")
         return acct, snap
+
+    def test_registered_tokenless_provider_uses_plain_add_route(self):
+        adapter = types.ModuleType("providers.fake_local")
+        adapter.PROVIDER = "fake_local"
+        adapter.AUTH = util.AUTH_NONE
+        adapter.poll = lambda conn, account, token: store.save_snapshot(
+            conn, account["id"], util.snapshot([]))
+        providers.register(adapter)
+        self.addCleanup(providers.reset_cache)
+
+        with mock.patch.object(pool, "DB", self.conn):
+            rc = pool.cmd_add("fake_local", "Local test")
+
+        self.assertEqual(rc, 0)
+        account = next(a for a in store.list_accounts(self.conn)
+                       if a["provider"] == "fake_local")
+        self.assertIsNone(store.get_token(self.conn, account["id"]))
+        self.assertEqual(store.latest_snapshot(self.conn, account["id"])["status"],
+                         "active")
 
     def test_every_oauth_provider_onboarding_polls(self):
         """cmd_add must call poller.poll_account for every OAuth provider."""

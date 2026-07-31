@@ -33,7 +33,8 @@ Usage:
 from __future__ import annotations
 import json, os, sys, time, datetime
 from pathlib import Path
-import store, oauth, work_queue
+import oauth, providers, store, work_queue
+from providers import util
 
 DB = store.connect()
 
@@ -92,21 +93,38 @@ def save_oauth_result(conn, provider, result, label=None, reconnect_id=None,
 
 # ─── add ───────────────────────────────────────────────────────────────────
 def cmd_add(provider, label=None, incognito=False):
-    if provider == "devin":
-        print("Devin uses API keys, not OAuth. Use: pool.py add-devin <api_key> [label]")
-        return 1
-    login = oauth.resolve_login(provider)
-    if login is None:
-        print(f"Unknown provider: {provider}. Choose: {', '.join(oauth.known_providers())}")
+    auth = providers.auth_kind(provider)
+    if auth is None:
+        print(f"Unknown provider: {provider}. Choose: {', '.join(providers.names())}")
         return 1
     if label is None:
         existing = len([a for a in store.list_accounts(DB) if a["provider"] == provider])
         label = f"{provider} #{existing + 1}"
     print(f"\n=== Onboarding {label} ({provider}) ===")
+    if auth in util.TOKENLESS:
+        acct_id = store.upsert_account(DB, provider, "local", label)
+        store.log_event(DB, acct_id, "onboard", True, f"{provider} local")
+        print(f"✓ Saved: {provider} / local (account #{acct_id})")
+        import poller
+        print("Fetching initial subscription data...")
+        poller.poll_account(DB, store.get_account(DB, acct_id))
+        return 0
+
+    login = oauth.resolve_login(provider)
+    if login is None:
+        print(f"No onboarding flow for {provider}")
+        return 1
     try:
-        result = login(incognito=incognito)
+        if auth == util.AUTH_API_KEY:
+            api_key = _read_api_key(f"{provider} API key: ")
+            if not api_key:
+                print(f"No API key provided for {provider}")
+                return 1
+            result = login(api_key)
+        else:
+            result = login(incognito=incognito)
     except Exception as e:
-        print(f"OAuth failed: {e}")
+        print(f"Onboarding failed: {e}")
         store.log_event(DB, None, "onboard", False, str(e))
         return 1
     email = result.get("email") or "unknown"
@@ -162,11 +180,17 @@ def cmd_reconnect(account_id, api_key=None, incognito=False):
         print(f"Account {account_id} not found")
         return 1
     provider = account["provider"]
+    auth = providers.auth_kind(provider)
     print(f"\n=== Reconnecting {account['label'] or account['email'] or account_id} ({provider}) ===")
+    if auth in util.TOKENLESS:
+        import poller
+        print("Fetching subscription data...")
+        poller.poll_account(DB, account)
+        return 0
     try:
-        if provider == "devin":
+        if auth == util.AUTH_API_KEY:
             if not api_key:
-                api_key = _read_api_key("Devin API key: ")
+                api_key = _read_api_key(f"{provider} API key: ")
             if not api_key:
                 print("usage: pool.py reconnect <account_id> [api_key] (or pipe the key via stdin)")
                 return 1
