@@ -10,8 +10,8 @@ Token expires: 2026-08-15 12:00
 Last poll: 2026-07-31 09:00
 <separator>
 Limit session
-5h limit: 61.0% used (Reset: 2026-07-31 15:00)
-weekly limit: 34.0% used (Reset: 2026-08-05 09:00)
+5h: 61.0% used
+weekly: 34.0% used
 Additional credits: 1200
 <separator>
 Resets (1)
@@ -36,9 +36,9 @@ Token expires: 2026-08-20 10:00
 Last poll: 2026-07-31 08:59
 <separator>
 Limit session
-5h limit: 42.5% used (Reset: 2026-07-31 14:30)
-weekly limit: 76.0% used (Reset: 2026-08-04 11:00)
-Fable limit: 18.0% used (Reset: 2026-08-03 08:00)
+5h: 42.5% used
+weekly: 76.0% used
+Claude Fable: 18.0% used
 <separator>
 Reconnect This Account
 Delete This Agent
@@ -52,7 +52,10 @@ Token expires: 2026-09-01 00:00
 Last poll: 2026-07-31 08:58
 <separator>
 Limit session
-monthly limit: 52.0% used (Reset: 2026-08-12 00:00)
+Grok credits: 52.0% used
+<separator>
+• Monthly: 7800/15000 credits
+•   Reset: 2026-08-12 00:00
 <separator>
 Reconnect This Account
 Delete This Agent
@@ -66,8 +69,8 @@ Token expires: 2026-08-10 18:00
 Last poll: 2026-07-31 08:57
 <separator>
 Limit session
-Gemini models · 5h limit: 27.0% used (Reset: 2026-07-31 13:00)
-Claude & GPT models · weekly limit: 64.0% used (Reset: 2026-08-06 09:00)
+Gemini models: 27.0% used
+Claude & GPT models: 64.0% used
 <separator>
 Reconnect This Account
 Delete This Agent
@@ -81,7 +84,11 @@ Token expires: 2026-09-30 00:00
 Last poll: 2026-07-31 08:56
 <separator>
 Limit session
-premium requests: 83.0% used (Reset: 2026-08-01 00:00)
+Premium requests: 83.0% used
+<separator>
+• SKU: copilot_pro_plus
+• Quota limit: 1000 premium requests
+• Quota reset: 2026-08-01 00:00
 <separator>
 Reconnect This Account
 Delete This Agent
@@ -95,17 +102,27 @@ Token expires: 2026-12-31 00:00
 Last poll: 2026-07-31 08:55
 <separator>
 Limit session
-weekly limit: 47.0% used (Reset: 2026-08-07 09:00)
+Daily compute units: 31.0% used
+Weekly compute units: 47.0% used
 <separator>
 Reconnect This Account
 Delete This Agent
 [kimi]
+Status
 Plan: coding-plan
 coding-plan · paid
-Remaining: 880 requests
-Reset: 2026-08-03 09:00
-Limit: 1000 requests
+Plan started: n/a
+Plan resets: n/a
+Token expires: n/a
 Last poll: 2026-07-31 08:54
+<separator>
+Limit session
+weekly: 12.0% used
+5h: 8.5% used
+<separator>
+• Remaining: 880 requests
+• Reset: 2026-08-03 09:00
+• Limit: 1000 requests
 <separator>
 Reconnect This Account
 Delete This Agent

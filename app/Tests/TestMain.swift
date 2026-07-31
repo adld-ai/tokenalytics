@@ -10,14 +10,19 @@ struct TestMain {
     }
 
     static func main() {
+        if CommandLine.arguments.contains("--print-submenus") {
+            print(submenuDump(), terminator: "")
+            return
+        }
         if CommandLine.arguments.contains("--record-golden-submenus") {
-            try! legacySubmenuDump().write(
+            try! submenuDump().write(
                 to: goldenURL(), atomically: true, encoding: .utf8)
             print("recorded \(goldenURL().path)")
             return
         }
         testStatusDecode()
         testFormatting()
+        testSubmenuSummaries()
         testGoldenSubmenus()
         if failures > 0 { print("\(failures) FAILURES"); exit(1) }
         print("all swift tests passed")
@@ -45,6 +50,7 @@ struct TestMain {
     }
 
     static func rowTitle(_ item: NSMenuItem) -> String {
+        if let title = item.representedObject as? String { return title }
         if item.view is FixedMenuSeparatorView { return "<separator>" }
         if let view = item.view,
            let label = view.subviews.compactMap({ $0 as? NSTextField }).first {
@@ -53,7 +59,7 @@ struct TestMain {
         return item.title
     }
 
-    static func legacySubmenuDump() -> String {
+    static func submenuDump() -> String {
         L10n.lang = .en
         let data = try! Data(contentsOf: fixtureURL())
         let payload = try! JSONDecoder().decode(StatusPayload.self, from: data)
@@ -69,7 +75,19 @@ struct TestMain {
 
     static func testGoldenSubmenus() {
         let expected = try! String(contentsOf: goldenURL(), encoding: .utf8)
-        expect(legacySubmenuDump() == expected, "account submenus match golden")
+        expect(submenuDump() == expected, "account submenus match golden")
+    }
+
+    static func testSubmenuSummaries() {
+        let data = try! Data(contentsOf: fixtureURL())
+        let p = try! JSONDecoder().decode(StatusPayload.self, from: data)
+        let d = AppDelegate()
+        for acct in p.accounts {
+            let lines = d.submenuSummary(acct)
+            expect(!lines.isEmpty, "\(acct.provider) submenu has rows")
+            expect(lines.allSatisfy { !$0.contains("nil") },
+                   "\(acct.provider) has no nil leakage")
+        }
     }
 
     static func testFormatting() {

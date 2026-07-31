@@ -291,16 +291,20 @@ final class GaugeRowView: NSView {
         super.draw(dirtyRect)
         let pct = max(0, min(100, info.used_pct ?? 0))
         let labelX: CGFloat = 28
-        let labelW: CGFloat = 62
         let rightW: CGFloat = 96
-        let barX = labelX + labelW + 6
-        let barW = bounds.width - barX - rightW - 16
         let attrsLabel: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 10.5),
             .foregroundColor: NSColor.secondaryLabelColor,
         ]
-        (kindLabel() as NSString).draw(
-            at: NSPoint(x: labelX, y: 2), withAttributes: attrsLabel)
+        let label = kindLabel()
+        let desiredLabelW = ceil((label as NSString).size(withAttributes: attrsLabel).width)
+        let maxLabelW = max(62, bounds.width - labelX - rightW - 70)
+        let labelW = min(max(62, desiredLabelW), maxLabelW)
+        let barX = labelX + labelW + 6
+        let barW = bounds.width - barX - rightW - 16
+        (label as NSString).draw(
+            with: NSRect(x: labelX, y: 2, width: labelW, height: 14),
+            options: [.truncatesLastVisibleLine], attributes: attrsLabel)
 
         let track = NSRect(x: barX, y: 5.5, width: barW, height: 5)
         NSColor.quaternaryLabelColor.setFill()
