@@ -1740,10 +1740,13 @@ extension AppDelegate: NSMenuDelegate {
         }
         menu.addItem(separatorRow())
 
-        // Group by provider
+        // Group by provider: the known order first, then anything the app has
+        // no opinion about, so a backend adapter for a new provider shows up
+        // here without waiting on an app release.
         let providerOrder = ["codex", "claude", "xai", "antigravity", "copilot", "cursor", "devin", "droid", "opencode"]
         let grouped = Dictionary(grouping: payload.accounts, by: { $0.provider })
-        for provider in providerOrder {
+        let unknown = grouped.keys.filter { !providerOrder.contains($0) }.sorted()
+        for provider in providerOrder + unknown {
             guard let accts = grouped[provider] else { continue }
             menu.addItem(headerItem(providerDisplayName(provider)))
             for acct in accts {
