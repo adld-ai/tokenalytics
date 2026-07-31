@@ -79,8 +79,7 @@ extension AppDelegate {
         var rows = statusGroup(acct)
         rows.append(contentsOf: limitSessionGroup(acct))
 
-        if acct.provider == "codex" {
-            let credits = acct.reset_credits ?? []
+        if let credits = acct.reset_credits {
             rows.append(.separator)
             rows.append(.groupHeader("\(t("resets")) (\(credits.count))"))
             rows.append(contentsOf: credits.map {
@@ -119,13 +118,11 @@ extension AppDelegate {
         if let line = subscriptionLine(acct) { rows.append(.info(line)) }
         if let start = planStartText(acct) { rows.append(.info(start)) }
         if let reset = planResetText(acct) { rows.append(.info(reset)) }
-        if acct.provider == "codex" {
-            if let created = acct.account_created, !created.isEmpty {
-                rows.append(.info(L10n.label("account_created", created)))
-            }
-            if let history = acct.payment_history, !history.isEmpty {
-                rows.append(.info(L10n.label("payment_history", history)))
-            }
+        if let created = acct.account_created, !created.isEmpty {
+            rows.append(.info(L10n.label("account_created", created)))
+        }
+        if let history = acct.payment_history, !history.isEmpty {
+            rows.append(.info(L10n.label("payment_history", history)))
         }
         if let expires = acct.token_expires, !expires.isEmpty {
             rows.append(.info(L10n.label("token_expires", expires)))

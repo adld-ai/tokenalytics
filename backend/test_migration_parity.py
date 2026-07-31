@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import status  # noqa: E402
 import window_history  # noqa: E402
-from providers import antigravity, copilot, devin, xai  # noqa: E402
+from providers import antigravity, codex, copilot, devin, xai  # noqa: E402
 
 
 GOLDEN_DIR = os.path.join(os.path.dirname(__file__), "fixtures", "golden")
@@ -122,6 +122,20 @@ class CodexParityTest(ParityCase):
         primary_reset_at=2000.0,
         primary_window_s=604800,
     )
+
+    def adapter_snapshot(self):
+        return codex.to_snapshot({
+            "captured_at": 1000.0,
+            "usage": {
+                "rate_limit": {
+                    "primary_window": {
+                        "used_percent": 6.0,
+                        "reset_after_seconds": 1000.0,
+                        "limit_window_seconds": 604800,
+                    },
+                },
+            },
+        })
 
 
 class ClaudeParityTest(ParityCase):

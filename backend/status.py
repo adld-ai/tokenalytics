@@ -684,11 +684,6 @@ def plan_label(provider, plan, item) -> tuple:
     if hook:
         return hook(plan, item)
     p = (plan or "").strip()
-    if provider == "codex":
-        m = {"plus": ("Plus", "$20/mo"), "pro": ("Pro", "$200/mo"),
-             "free": ("Free", "$0"), "team": ("Team", "$30/user/mo"),
-             "business": ("Business", None), "enterprise": ("Enterprise", None)}
-        return m.get(p.lower(), (p.title() or None, None))
     if provider == "claude":
         m = {"claude pro": ("Claude Pro", "$20/mo"), "claude max": ("Claude Max", "$100/mo")}
         return m.get(p.lower(), (p or None, None))
@@ -874,8 +869,6 @@ def build_payload(conn) -> dict:
             "primary_reset": ts_fmt(snap["primary_reset_at"]) if snap and snap["primary_reset_at"] else None,
             "secondary_used_pct": snap["secondary_used_pct"] if snap else None,
             "secondary_reset": ts_fmt(snap["secondary_reset_at"]) if snap and snap["secondary_reset_at"] else None,
-            "credits_balance": snap["credits_balance"] if snap else None,
-            "banked_resets": snap["banked_resets"] if snap else None,
             "rate_limit_remaining": snap["rate_limit_remaining"] if snap else None,
             "rate_limit_reset": reset_fmt(snap["rate_limit_reset"]) if snap and snap.get("rate_limit_reset") is not None else None,
             "rate_limit_limit": snap["rate_limit_limit"] if snap else None,
@@ -890,10 +883,11 @@ def build_payload(conn) -> dict:
             "monthly_used_pct": float(snap["monthly_used_pct"]) if snap and snap.get("monthly_used_pct") is not None else None,
             "monthly_period_start": iso_fmt(snap.get("monthly_period_start")) if snap and snap.get("monthly_period_start") else None,
             "monthly_period_end": iso_fmt(snap.get("monthly_period_end")) if snap and snap.get("monthly_period_end") else None,
-            "reset_credits": [{"title": c["title"], "status": c["status"],
-                               "expires_at": iso_fmt_exact(c["expires_at"]) or c["expires_at"],
-                               "granted_at": c.get("granted_at"),
-                               "description": c.get("description")} for c in credits],
+            "reset_credits": ([{"title": c["title"], "status": c["status"],
+                                "expires_at": iso_fmt_exact(c["expires_at"]) or c["expires_at"],
+                                "granted_at": c.get("granted_at"),
+                                "description": c.get("description")} for c in credits]
+                              if a["provider"] == "codex" else None),
             "last_poll": ts_fmt(snap["ts"]) if snap else None,
             # Raw epoch of the newest snapshot: should_swap's freshness rail
             # (spec §3.2) must not re-parse the KST-rendered last_poll string.
@@ -904,6 +898,7 @@ def build_payload(conn) -> dict:
             items[-1].update(heartbeat_meta(conn, a["id"]))
         if a["provider"] == "codex":
             items[-1].update(codex_extra(conn, a["id"]))
+            items[-1].update(provider_extra(a["provider"], snap))
         elif a["provider"] == "claude":
             items[-1].update(claude_extra(snap))
         elif a["provider"] in ("xai", "antigravity", "copilot", "devin"):

@@ -10,6 +10,7 @@ os.environ["AGENT_POOL_HISTORY_DIR"] = os.path.join(_TMP, "history")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import local_sync  # noqa: E402
+from providers import codex  # noqa: E402
 
 CODEX_EVENT = {
     "timestamp": "2026-07-16T13:45:00.000Z",
@@ -60,6 +61,7 @@ class CodexSnapTest(unittest.TestCase):
         self.assertEqual(snap["primary_window_s"], 10080 * 60)
         self.assertEqual(snap["primary_reset_at"], 1784781194.0)
         self.assertEqual(snap["credits_balance"], 2500.0)
+        self.assertEqual(codex.EXTRA(snap)["credits_balance"], 2500.0)
         self.assertEqual(snap["plan"], "pro")
         self.assertNotIn("secondary_used_pct", snap)
 

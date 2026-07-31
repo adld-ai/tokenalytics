@@ -2,7 +2,6 @@
 60s hot / 180s hot-claude, pre-reset capture near known boundaries).
 
 Limit sources:
-  codex:        chatgpt.com/backend-api/wham/usage + /wham/rate-limit-reset-credits
   claude:       api.anthropic.com/api/oauth/usage (five_hour/seven_day/limits[])
   copilot:      api.github.com/copilot_internal/user (quota_snapshots.premium_interactions)
 
@@ -14,7 +13,6 @@ from __future__ import annotations
 import json, os, re, sys, time, datetime, urllib.request, urllib.error
 import providers, store, oauth, window_history, work_queue
 
-WHAM = "https://chatgpt.com/backend-api"
 POLL_INTERVAL = int(os.environ.get("AGENT_POOL_POLL_INTERVAL", "300"))  # 5 min
 LOCAL_SYNC_INTERVAL_S = int(os.environ.get("LOCAL_SYNC_INTERVAL_S", "15"))
 
@@ -93,107 +91,6 @@ def _post(url, data, headers, timeout=15):
     for k, v in (headers or {}).items():
         req.add_header(k, v)
     return _send_with_retry(req, timeout)
-
-
-def _shape_error(source, resp):
-    """Error snapshot for a response that isn't the expected JSON object."""
-    return {"status": "error",
-            "status_message": f"{source}: unexpected response shape: {str(resp)[:120]}"}
-
-
-# ─── Codex wham ────────────────────────────────────────────────────────────
-def poll_codex(conn, account, token):
-    aid = account["account_id"] or ""
-    headers = {"Authorization": f"Bearer {token['access_token']}",
-               "ChatGPT-Account-Id": aid, "User-Agent": "agent-pool/1.0",
-               "OAI-Product-Sku": "codex"}
-    # usage
-    st, usage, _ = _get(f"{WHAM}/wham/usage", headers)
-    snap = {"status": "active", "status_message": "", "raw_json": json.dumps({"usage": usage}) if isinstance(usage, dict) else str(usage)}
-    if st != 200:
-        snap["status"] = "error"
-        snap["status_message"] = f"wham/usage HTTP {st}: {str(usage)[:120]}"
-        store.save_snapshot(conn, account["id"], snap)
-        store.log_event(conn, account["id"], "limit_poll", False, snap["status_message"])
-        return
-    if not isinstance(usage, dict):
-        snap = _shape_error("wham/usage", usage)
-        store.save_snapshot(conn, account["id"], snap)
-        store.log_event(conn, account["id"], "limit_poll", False, snap["status_message"])
-        return
-    snap["plan"] = usage.get("plan_type")
-    rl = usage.get("rate_limit") or {}
-    pw = rl.get("primary_window") or {}
-    sw = rl.get("secondary_window") or {}
-    snap["primary_used_pct"] = pw.get("used_percent")
-    snap["primary_reset_at"] = (time.time() + pw["reset_after_seconds"]) if pw.get("reset_after_seconds") is not None else None
-    snap["primary_window_s"] = pw.get("limit_window_seconds")
-    snap["secondary_used_pct"] = sw.get("used_percent")
-    snap["secondary_reset_at"] = (time.time() + sw["reset_after_seconds"]) if sw.get("reset_after_seconds") is not None else None
-    snap["secondary_window_s"] = sw.get("limit_window_seconds")
-    snap["credits_balance"] = (usage.get("credits") or {}).get("balance")
-    snap["banked_resets"] = (usage.get("rate_limit_reset_credits") or {}).get("available_count")
-    store.save_snapshot(conn, account["id"], snap)
-
-    # reset credits detail
-    st2, credits, _ = _get(f"{WHAM}/wham/rate-limit-reset-credits", headers)
-    if st2 == 200 and isinstance(credits, dict):
-        credit_list = credits.get("credits") or []
-        store.replace_reset_credits(conn, account["id"], credit_list)
-        store.upsert_credit_history(conn, account["id"], credit_list)
-    _sync_codex_subscription_meta(conn, account, headers)
-    store.log_event(conn, account["id"], "limit_poll", True, "")
-
-
-def _sync_codex_subscription_meta(conn, account, headers):
-    """Best-effort ChatGPT account metadata sync for Codex subscriptions."""
-    aid = account.get("account_id") or ""
-    if not aid:
-        return
-    existing = store.get_subscription_meta(conn, account["id"]) or {}
-    account_created_at = existing.get("account_created_at")
-
-    st, accounts_body, _ = _get(f"{WHAM}/accounts", headers)
-    if st == 200 and isinstance(accounts_body, dict):
-        for item in accounts_body.get("items") or []:
-            if isinstance(item, dict) and item.get("id") == aid:
-                account_created_at = item.get("created_time") or account_created_at
-                break
-
-    st, check_body, _ = _get(f"{WHAM}/accounts/check/v4-2023-04-27", headers)
-    if st != 200 or not isinstance(check_body, dict):
-        return
-    entry = (check_body.get("accounts") or {}).get(aid) or {}
-    acct = entry.get("account") or {}
-    ent = entry.get("entitlement") or {}
-    if not acct and not ent:
-        return
-
-    renews_at = ent.get("renews_at")
-    expires_at = ent.get("expires_at")
-    gratis = ent.get("is_active_subscription_gratis")
-    plan = ent.get("subscription_plan")
-    if gratis:
-        note = f"active free promotion; expires_at={expires_at}" if expires_at else "active free promotion"
-    elif ent.get("has_active_subscription"):
-        note = f"active paid subscription; renews_at={renews_at}" if renews_at else "active paid subscription"
-    else:
-        note = "subscription metadata synced from accounts/check"
-
-    store.upsert_subscription_meta(
-        conn,
-        account["id"],
-        paid_since=existing.get("paid_since"),
-        renews_at=renews_at,
-        expires_at=expires_at,
-        account_created_at=account_created_at,
-        subscription_plan=plan,
-        has_active_subscription=ent.get("has_active_subscription"),
-        is_active_subscription_gratis=gratis,
-        has_previously_paid_subscription=acct.get("has_previously_paid_subscription"),
-        previous_paid_months=existing.get("previous_paid_months"),
-        billing_note=note,
-    )
 
 
 # ─── Claude oauth/usage ────────────────────────────────────────────────────
@@ -321,7 +218,6 @@ def _claude_profile(token):
     }
 # ─── dispatch ──────────────────────────────────────────────────────────────
 POLLERS = {
-    "codex": poll_codex,
     "claude": poll_claude,
 }
 
@@ -386,19 +282,20 @@ def _poll_one(conn, account) -> bool:
     # error skip detection (prev=None, no coupon hint) and poll anyway.
     try:
         prev = store.latest_successful_snapshot(conn, account["id"])
-        prev_credits = ({c["credit_id"]: c["status"] for c in store.list_reset_credits(conn, account["id"])}
-                        if account["provider"] == "codex" else {})
     except Exception as e:
         print(f"  pre-poll capture failed {account['provider']} #{account['id']}: {e}")
-        prev, prev_credits = None, {}
+        prev = None
     try:
-        poller(conn, account, token)
+        poll_meta = poller(conn, account, token)
         print(f"  ✓ {account['provider']:12} {account['email'] or account['label']}")
     except Exception as e:
         store.save_snapshot(conn, account["id"], {"status": "error", "status_message": str(e)[:200]})
         store.log_event(conn, account["id"], "limit_poll", False, str(e))
         print(f"  ✗ {account['provider']:12} {account['email'] or account['label']}: {e}")
         return False
+    if not isinstance(poll_meta, dict):
+        poll_meta = {}
+    prev_credits = poll_meta.get("reset_credit_baseline") or {}
     _archive_closed_windows(conn, account, prev, prev_credits)
     return True
 
@@ -709,7 +606,8 @@ def redeem_reset(conn, account_id) -> int:
     # Hold the poll lock through consume + ledger + re-poll so the daemon
     # can't poll (and rewrite reset_credits) mid-redemption.
     with work_queue.exclusive("poll"):
-        st, resp, _ = _post(f"{WHAM}/wham/rate-limit-reset-credits/consume",
+        codex_adapter = providers.get("codex")
+        st, resp, _ = _post(f"{codex_adapter.WHAM}/wham/rate-limit-reset-credits/consume",
                          {"credit_id": credit["credit_id"], "redeem_request_id": str(uuid.uuid4())},
                          {"Authorization": f"Bearer {token['access_token']}",
                           "ChatGPT-Account-Id": a["account_id"], "User-Agent": "agent-pool/1.0"})
@@ -727,7 +625,7 @@ def redeem_reset(conn, account_id) -> int:
             except Exception as e:
                 print(f"  window-history archive failed: {e}")
             # Re-poll to show updated state
-            poll_codex(conn, a, token)
+            resolve_poller("codex")(conn, a, token)
             return 0
         else:
             print(f"Redeem failed: HTTP {st} {resp}")

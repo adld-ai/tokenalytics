@@ -24,7 +24,7 @@ os.environ["AGENT_POOL_STATUS_JSON"] = str(Path(_TMP) / "status.json")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import providers, store, oauth, poller, pool, status  # noqa: E402
-from providers import antigravity, copilot, devin, util, xai  # noqa: E402
+from providers import antigravity, codex, copilot, devin, util, xai  # noqa: E402
 
 
 def _iso(ts):
@@ -228,9 +228,10 @@ class OnboardingPollTests(unittest.TestCase):
 
     # Helper: run onboarding for a provider and return the saved snapshot.
     def _onboard(self, provider):
-        if provider in ("antigravity", "copilot", "xai"):
+        if provider in ("antigravity", "codex", "copilot", "xai"):
             adapter = {
                 "antigravity": antigravity,
+                "codex": codex,
                 "copilot": copilot,
                 "xai": xai,
             }[provider]
@@ -283,7 +284,7 @@ class OnboardingPollTests(unittest.TestCase):
         reconnected = _fake_login("codex")
         reconnected["access_token"] = "fake-codex-reconnected-access"
         reconnected["refresh_token"] = "fake-codex-reconnected-refresh"
-        with mock.patch.dict(oauth.LOGIN_FUNCS, {"codex": lambda incognito=False: reconnected}):
+        with mock.patch.object(codex, "LOGIN", return_value=reconnected):
             rc = pool.cmd_reconnect(str(acct["id"]))
         self.assertEqual(rc, 0)
         accounts = [a for a in store.list_accounts(self.conn) if a["provider"] == "codex"]
@@ -298,14 +299,30 @@ class OnboardingPollTests(unittest.TestCase):
     # ── per-provider subscription field coverage ──
     def test_codex_subscription_data(self):
         _, snap = self._onboard("codex")
-        for f in ("plan", "primary_used_pct", "primary_reset_at", "primary_window_s",
-                  "secondary_used_pct", "secondary_reset_at", "secondary_window_s",
-                  "credits_balance", "banked_resets"):
-            self.assertIsNotNone(snap[f], f"codex snapshot missing {f}")
+        self.assertEqual(snap["plan"], "pro")
+        raw = json.loads(snap["raw_json"])
+        windows = {window["kind"]: window for window in raw["windows"]}
+        self.assertEqual(windows["5h"]["used_pct"], 42.0)
+        self.assertEqual(windows["5h"]["window_s"], 7200)
+        self.assertIsNotNone(windows["5h"].get("reset_at"))
+        self.assertEqual(windows["weekly"]["used_pct"], 10.0)
+        self.assertEqual(windows["weekly"]["window_s"], 172800)
+        self.assertIsNotNone(windows["weekly"].get("reset_at"))
+        exported = codex.EXTRA(snap)
+        self.assertEqual(exported["credits_balance"], 12.5)
+        self.assertEqual(exported["banked_resets"], 2)
+        self.assertEqual(len(exported["reset_credits"]), 1)
         # reset credits table must be populated
         acct = next(a for a in store.list_accounts(self.conn) if a["provider"] == "codex")
         credits = store.list_reset_credits(self.conn, acct["id"])
         self.assertEqual(len(credits), 1, "codex reset credits not populated")
+
+    def test_codex_poll_returns_reset_credit_baseline(self):
+        acct, _ = self._onboard("codex")
+        token = store.get_token(self.conn, acct["id"])
+        poll_meta = codex.poll(self.conn, acct, token)
+        self.assertEqual(poll_meta["reset_credit_baseline"],
+                         {"rc1": "available"})
 
     def test_claude_subscription_data(self):
         _, snap = self._onboard("claude")

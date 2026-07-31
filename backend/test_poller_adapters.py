@@ -7,6 +7,7 @@ that exists for the OAuth providers.
 """
 from __future__ import annotations
 import contextlib, io, json, os, sys, tempfile, types, unittest
+from unittest import mock
 
 _TMP = tempfile.mkdtemp(prefix="tsb-test-")
 os.environ["AGENT_POOL_DB"] = os.path.join(_TMP, "pool.db")
@@ -17,6 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import poller  # noqa: E402
 import providers  # noqa: E402
 import store  # noqa: E402
+from providers import codex  # noqa: E402
 from providers import util  # noqa: E402
 
 
@@ -31,8 +33,8 @@ class ResolvePollerTest(unittest.TestCase):
         providers.reset_cache()
         self.addCleanup(providers.reset_cache)
 
-    def test_legacy_provider_still_resolves(self):
-        self.assertIs(poller.resolve_poller("codex"), poller.poll_codex)
+    def test_migrated_codex_resolves_from_adapter(self):
+        self.assertIs(poller.resolve_poller("codex"), codex.poll)
 
     def test_adapter_resolves(self):
         fn = lambda conn, account, token: None  # noqa: E731
@@ -115,6 +117,23 @@ class TokenGateTest(unittest.TestCase):
         snap = store.latest_snapshot(self.conn, account["id"])
         self.assertEqual(snap["status"], "error")
         self.assertIn("not running", snap["status_message"])
+
+    def test_poll_metadata_forwards_reset_credit_baseline(self):
+        providers.register(adapter(
+            "creditful",
+            util.AUTH_OAUTH,
+            lambda conn, account, token: {
+                "reset_credit_baseline": {"credit-1": "available"},
+            },
+        ))
+        account = self._account("creditful")
+        store.save_token(
+            self.conn, account["id"], "token", None, None, 9_999_999_999, None
+        )
+        with mock.patch.object(poller, "_archive_closed_windows") as archive:
+            self.assertTrue(self._run(account))
+        self.assertEqual(archive.call_args.args[3],
+                         {"credit-1": "available"})
 
 
 if __name__ == "__main__":

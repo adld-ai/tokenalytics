@@ -108,16 +108,20 @@ class RegistryTest(unittest.TestCase):
         self.assertIs(oauth.resolve_refresh("hooked"), refresh)
         self.assertIn("hooked", oauth.known_providers())
 
+    def test_codex_declares_heartbeat_and_swap_capabilities(self):
+        self.assertEqual(providers.caps("codex"),
+                         frozenset({"heartbeat", "swap"}))
+
     def test_legacy_oauth_hooks_override_adapter_hooks(self):
-        legacy_login = oauth.resolve_login("codex")
-        legacy_refresh = oauth.resolve_refresh("codex")
-        adapter = fake_adapter("codex", util.AUTH_OAUTH)
+        legacy_login = oauth.resolve_login("claude")
+        legacy_refresh = oauth.resolve_refresh("claude")
+        adapter = fake_adapter("claude", util.AUTH_OAUTH)
         adapter.LOGIN = lambda incognito=False: None
         adapter.REFRESH = lambda token: None
         providers.register(adapter)
 
-        self.assertIs(oauth.resolve_login("codex"), legacy_login)
-        self.assertIs(oauth.resolve_refresh("codex"), legacy_refresh)
+        self.assertIs(oauth.resolve_login("claude"), legacy_login)
+        self.assertIs(oauth.resolve_refresh("claude"), legacy_refresh)
 
     def test_adapter_with_unknown_capability_is_rejected(self):
         adapter = fake_adapter("future", util.AUTH_OAUTH)

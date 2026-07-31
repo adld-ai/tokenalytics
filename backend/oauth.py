@@ -225,82 +225,6 @@ def decode_jwt_payload(token: str) -> dict:
         return {}
 
 
-# ─── Codex (OpenAI) ────────────────────────────────────────────────────────
-CODEX = {
-    "auth_url": "https://auth.openai.com/oauth/authorize",
-    "token_url": "https://auth.openai.com/oauth/token",
-    "client_id": "app_EMoamEEZ73f0CkXaXp7hrann",
-    "redirect_uri": "http://localhost:1455/auth/callback",
-    "scope": "openid email profile offline_access",
-    "port": 1455,
-}
-
-
-def login_codex(incognito: bool = False) -> dict:
-    verifier, challenge = gen_pkce()
-    state = gen_state()
-    params = {
-        "client_id": CODEX["client_id"],
-        "response_type": "code",
-        "redirect_uri": CODEX["redirect_uri"],
-        "scope": CODEX["scope"],
-        "state": state,
-        "code_challenge": challenge,
-        "code_challenge_method": "S256",
-        "prompt": "login",
-        "id_token_add_organizations": "true",
-        "codex_cli_simplified_flow": "true",
-    }
-    auth_url = f"{CODEX['auth_url']}?{urllib.parse.urlencode(params)}"
-    open_browser(auth_url, incognito)
-    print("Waiting for Codex callback on port 1455...")
-    result = wait_for_callback(CODEX["port"], host="localhost", path="/auth/callback")
-    if result.get("error"):
-        raise RuntimeError(f"Codex OAuth error: {result.get('error_description', result['error'])}")
-    if result.get("state") != state:
-        raise RuntimeError("Codex OAuth state mismatch")
-    code = result["code"]
-    st, tok = http_post(CODEX["token_url"], {
-        "grant_type": "authorization_code",
-        "client_id": CODEX["client_id"],
-        "code": code,
-        "redirect_uri": CODEX["redirect_uri"],
-        "code_verifier": verifier,
-    })
-    if st != 200:
-        raise RuntimeError(f"Codex token exchange failed: {st} {tok}")
-    claims = decode_jwt_payload(tok.get("id_token", ""))
-    auth_info = claims.get("https://api.openai.com/auth", {})
-    email = claims.get("email") or claims.get("https://api.openai.com/profile", {}).get("email", "")
-    return {
-        "access_token": tok["access_token"],
-        "refresh_token": tok.get("refresh_token"),
-        "id_token": tok.get("id_token"),
-        "expires_at": time.time() + tok.get("expires_in", 3600),
-        "account_id": auth_info.get("chatgpt_account_id", ""),
-        "email": email,
-        "plan": auth_info.get("chatgpt_plan_type", ""),
-        "raw": tok,
-    }
-
-
-def refresh_codex(refresh_token: str) -> dict:
-    st, tok = http_post(CODEX["token_url"], {
-        "grant_type": "refresh_token",
-        "client_id": CODEX["client_id"],
-        "refresh_token": refresh_token,
-    })
-    if st != 200:
-        raise RuntimeError(f"Codex refresh failed: {st} {tok}")
-    return {
-        "access_token": tok["access_token"],
-        "refresh_token": tok.get("refresh_token", refresh_token),
-        "id_token": tok.get("id_token"),
-        "expires_at": time.time() + tok.get("expires_in", 3600),
-        "raw": tok,
-    }
-
-
 # ─── Claude (Anthropic) ────────────────────────────────────────────────────
 CLAUDE = {
     "auth_url": "https://claude.ai/oauth/authorize",
@@ -381,12 +305,10 @@ def refresh_claude(refresh_token: str) -> dict:
 
 # ─── registry ──────────────────────────────────────────────────────────────
 LOGIN_FUNCS = {
-    "codex": login_codex,
     "claude": login_claude,
 }
 
 REFRESH_FUNCS = {
-    "codex": refresh_codex,
     "claude": refresh_claude,
 }
 
@@ -423,47 +345,6 @@ def known_providers():
 # polls GET /api/oauth/status until the loopback callback lands. Each provider
 # is described declaratively so the flow manager owns the state machine
 # (listener + CSRF + background exchange) instead of every provider function.
-
-def _authorize_codex(state: str, challenge: str) -> str:
-    params = {
-        "client_id": CODEX["client_id"],
-        "response_type": "code",
-        "redirect_uri": CODEX["redirect_uri"],
-        "scope": CODEX["scope"],
-        "state": state,
-        "code_challenge": challenge,
-        "code_challenge_method": "S256",
-        "prompt": "login",
-        "id_token_add_organizations": "true",
-        "codex_cli_simplified_flow": "true",
-    }
-    return f"{CODEX['auth_url']}?{urllib.parse.urlencode(params)}"
-
-
-def _exchange_codex(code: str, state: str, verifier: str) -> dict:
-    st, tok = http_post(CODEX["token_url"], {
-        "grant_type": "authorization_code",
-        "client_id": CODEX["client_id"],
-        "code": code,
-        "redirect_uri": CODEX["redirect_uri"],
-        "code_verifier": verifier,
-    })
-    if st != 200:
-        raise RuntimeError(f"Codex token exchange failed: {st} {tok}")
-    claims = decode_jwt_payload(tok.get("id_token", ""))
-    auth_info = claims.get("https://api.openai.com/auth", {})
-    email = claims.get("email") or claims.get("https://api.openai.com/profile", {}).get("email", "")
-    return {
-        "access_token": tok["access_token"],
-        "refresh_token": tok.get("refresh_token"),
-        "id_token": tok.get("id_token"),
-        "expires_at": time.time() + tok.get("expires_in", 3600),
-        "account_id": auth_info.get("chatgpt_account_id", ""),
-        "email": email,
-        "plan": auth_info.get("chatgpt_plan_type", ""),
-        "raw": tok,
-    }
-
 
 def _authorize_claude(state: str, challenge: str) -> str:
     redirect = f"http://localhost:{CLAUDE['port']}/callback"
@@ -514,8 +395,6 @@ def _exchange_claude(code: str, state: str, verifier: str) -> dict:
 # Each spec: which loopback (host/port/path) to advertise, whether the flow uses
 # PKCE, and the authorize-URL + token-exchange callables above.
 BROWSER_FLOWS: dict[str, dict] = {
-    "codex": {"host": "localhost", "port": CODEX["port"], "path": "/auth/callback",
-              "pkce": True, "authorize": _authorize_codex, "exchange": _exchange_codex},
     "claude": {"host": "localhost", "port": CLAUDE["port"], "path": "/callback",
                "pkce": True, "authorize": _authorize_claude, "exchange": _exchange_claude},
 }
