@@ -205,7 +205,7 @@ extension AppDelegate {
     }
 
     func planStartText(_ acct: Account) -> String? {
-        let start = acct.plan_start ?? acct.billing_period_start ?? acct.monthly_period_start
+        let start = acct.plan_start ?? acct.monthly_period_start
         if let start, !start.isEmpty {
             return L10n.label("plan_started", start)
         }
@@ -213,7 +213,21 @@ extension AppDelegate {
     }
 
     func planResetText(_ acct: Account) -> String? {
-        let end = acct.plan_reset ?? acct.monthly_period_end
+        let end: String?
+        if acct.provider == "copilot" {
+            let reset = (acct.windows ?? []).compactMap(\.reset_at_epoch).first
+            if let reset {
+                let formatter = DateFormatter()
+                formatter.locale = Locale(identifier: "en_US_POSIX")
+                formatter.timeZone = TimeZone(identifier: "Asia/Seoul")
+                formatter.dateFormat = "yyyy-MM-dd"
+                end = formatter.string(from: Date(timeIntervalSince1970: reset))
+            } else {
+                end = nil
+            }
+        } else {
+            end = acct.plan_reset ?? acct.monthly_period_end
+        }
         if let end, !end.isEmpty {
             if acct.provider == "codex", acct.is_active_subscription_gratis == true {
                 return L10n.label("plan_expires", end)

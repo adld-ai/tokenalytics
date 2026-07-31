@@ -155,7 +155,7 @@
       "monthly_used_pct": 52.0,
       "monthly_period_start": "2026-07-12",
       "monthly_period_end": "2026-08-12",
-      "billing_period_start": "2026-07-12",
+      "plan_start": "2026-07-12",
       "on_demand_cap": 500,
       "last_poll": "2026-07-31 08:58",
       "windows": [
@@ -260,11 +260,10 @@
       "token_expires": "2026-09-30 00:00",
       "primary_used_pct": 83.0,
       "primary_reset": "2026-08-01 00:00",
-      "sku": "copilot_pro_plus",
-      "limited_user_quotas": "1000 premium requests",
-      "limited_user_reset_date": "2026-08-01 00:00",
-      "billing_period_start": "2026-07-01",
-      "plan_reset": "2026-08-01",
+      "access_sku": "copilot_pro_plus",
+      "rate_limit_limit": "1000 premium requests",
+      "rate_limit_reset": "2026-08-01 00:00",
+      "plan_start": "2026-07-01",
       "last_poll": "2026-07-31 08:56",
       "windows": [
         {

@@ -1,4 +1,4 @@
-"""OAuth flows for all providers: Codex, Claude, xAI, Antigravity, GitHub Copilot.
+"""Shared OAuth helpers and the remaining legacy provider flows.
 
 Each provider function returns a dict with:
   access_token, refresh_token, id_token, expires_at (epoch s), account_id, email, plan, raw
@@ -576,120 +576,12 @@ def refresh_antigravity(refresh_token: str) -> dict:
     }
 
 
-# ─── GitHub Copilot (device flow) ──────────────────────────────────────────
-COPILOT = {
-    "device_code_url": "https://github.com/login/device/code",
-    "token_url": "https://github.com/login/oauth/access_token",
-    "copilot_token_url": "https://api.github.com/copilot_internal/v2/token",
-    "client_id": "Iv1.b507a08c87ecfe98",
-    "scope": "read:user",
-}
-
-
-def login_copilot(incognito: bool = False) -> dict:
-    # Step 1: request device code
-    st, resp = http_post_json(COPILOT["device_code_url"], {
-        "client_id": COPILOT["client_id"],
-        "scope": COPILOT["scope"],
-    }, {"User-Agent": "agent-pool/1.0", "Accept": "application/json"})
-    if st != 200:
-        raise RuntimeError(f"Copilot device code request failed: {st} {resp}")
-    device_code = resp["device_code"]
-    user_code = resp["user_code"]
-    verification_uri = resp.get("verification_uri", "https://github.com/login/device")
-    interval = resp.get("interval", 5)
-    expires_in = resp.get("expires_in", 899)
-
-    print(f"\n=== GitHub Copilot Device Flow ===")
-    print(f"Open: {verification_uri}")
-    print(f"Enter code: {user_code}")
-    open_browser(verification_uri)
-    print(f"Waiting for authorization (expires in {expires_in}s)...")
-
-    # Step 2: poll for token
-    deadline = time.time() + expires_in
-    while time.time() < deadline:
-        time.sleep(interval)
-        st, tok = http_post_json(COPILOT["token_url"], {
-            "client_id": COPILOT["client_id"],
-            "device_code": device_code,
-            "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
-        }, {"User-Agent": "agent-pool/1.0", "Accept": "application/json"})
-        if st == 200 and isinstance(tok, dict) and tok.get("access_token"):
-            break
-        if isinstance(tok, dict):
-            err = tok.get("error", "")
-            if err == "authorization_pending":
-                continue
-            elif err == "slow_down":
-                interval += 5
-                continue
-            elif err == "expired_token":
-                raise RuntimeError("Copilot device code expired")
-            else:
-                raise RuntimeError(f"Copilot token poll error: {tok}")
-    else:
-        raise RuntimeError("Copilot device flow timed out")
-
-    github_token = tok["access_token"]
-
-    # Step 3: fetch GitHub user info
-    st2, user = http_get("https://api.github.com/user",
-                         {"Authorization": f"token {github_token}", "User-Agent": "agent-pool/1.0"})[:2]
-    username = ""
-    github_user_id = ""
-    if isinstance(user, dict):
-        username = user.get("login", "")
-        github_user_id = str(user.get("id", ""))
-
-    # Step 4: exchange for Copilot token
-    st3, ctoken_resp = http_get(COPILOT["copilot_token_url"],
-                                {"Authorization": f"token {github_token}",
-                                 "User-Agent": "agent-pool/1.0",
-                                 "X-GitHub-Api-Version": "2025-04-01"})[:2]
-
-    copilot_token = ""
-    copilot_expires = 0
-    if isinstance(ctoken_resp, dict):
-        copilot_token = ctoken_resp.get("token", "")
-        copilot_expires = ctoken_resp.get("expires_at", 0)
-
-    return {
-        "access_token": github_token,  # the github oauth token (long-lived)
-        "refresh_token": None,  # GitHub device flow has no refresh token
-        "id_token": "",
-        "expires_at": copilot_expires or (time.time() + 7200),  # copilot token expiry
-        "account_id": github_user_id,
-        "email": username,  # GitHub username as identifier
-        "plan": "copilot",
-        "raw": {"github_token": github_token, "copilot_token": copilot_token,
-                "copilot_expires_at": copilot_expires, "user": user if isinstance(user, dict) else {}},
-    }
-
-
-def refresh_copilot(github_token: str) -> dict:
-    """Copilot tokens can't be refreshed via OAuth; re-exchange the github token for a new copilot token."""
-    st, resp = http_get(COPILOT["copilot_token_url"],
-                        {"Authorization": f"token {github_token}",
-                         "User-Agent": "agent-pool/1.0",
-                         "X-GitHub-Api-Version": "2025-04-01"})[:2]
-    if st != 200:
-        raise RuntimeError(f"Copilot token refresh failed: {st} {resp}")
-    return {
-        "access_token": github_token,
-        "copilot_token": resp.get("token", ""),
-        "expires_at": resp.get("expires_at", 0),
-        "raw": resp,
-    }
-
-
 # ─── registry ──────────────────────────────────────────────────────────────
 LOGIN_FUNCS = {
     "codex": login_codex,
     "claude": login_claude,
     "xai": login_xai,
     "antigravity": login_antigravity,
-    "copilot": login_copilot,
 }
 
 REFRESH_FUNCS = {
@@ -697,7 +589,6 @@ REFRESH_FUNCS = {
     "claude": refresh_claude,
     "xai": refresh_xai,
     "antigravity": refresh_antigravity,
-    "copilot": refresh_copilot,
 }
 
 PROVIDERS = list(LOGIN_FUNCS.keys())

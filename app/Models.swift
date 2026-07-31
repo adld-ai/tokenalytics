@@ -47,9 +47,6 @@ struct Account: Codable, Identifiable {
     var rate_limit_remaining: String?
     var rate_limit_reset: String?
     var rate_limit_limit: String?
-    var sku: String?
-    var limited_user_quotas: String?
-    var limited_user_reset_date: String?
     var plan_reset: String?
     var monthly_used: Double?
     var monthly_limit: Double?
@@ -82,7 +79,6 @@ struct Account: Codable, Identifiable {
     var fable_status: String?
     // Grok / Antigravity / Copilot / Devin subscription details
     var on_demand_cap: Int?
-    var billing_period_start: String?
     var tier_id: String?
     var tier_description: String?
     var access_sku: String?

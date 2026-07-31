@@ -258,11 +258,11 @@ extension AppDelegate {
             lines.append("\(L10n.tr("fable_limit")): \(L10n.tr("fable_\(status)"))")
         }
         if acct.provider == "copilot" {
-            if let sku = acct.sku { lines.append(L10n.label("sku", sku)) }
-            if let quota = acct.limited_user_quotas {
+            if let sku = acct.access_sku { lines.append(L10n.label("sku", sku)) }
+            if let quota = acct.rate_limit_limit {
                 lines.append(L10n.label("quota_limit", quota))
             }
-            if let reset = acct.limited_user_reset_date {
+            if let reset = acct.rate_limit_reset {
                 lines.append(L10n.label("quota_reset", reset))
             }
         }
@@ -277,10 +277,10 @@ extension AppDelegate {
         if let remaining = acct.rate_limit_remaining {
             lines.append(L10n.label("remaining", remaining))
         }
-        if let reset = acct.rate_limit_reset {
+        if acct.provider != "copilot", let reset = acct.rate_limit_reset {
             lines.append(L10n.label("reset", reset))
         }
-        if let limit = acct.rate_limit_limit {
+        if acct.provider != "copilot", let limit = acct.rate_limit_limit {
             lines.append(L10n.label("limit", limit))
         }
         return lines

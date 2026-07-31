@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import status  # noqa: E402
 import window_history  # noqa: E402
-from providers import devin  # noqa: E402
+from providers import copilot, devin  # noqa: E402
 
 
 GOLDEN_DIR = os.path.join(os.path.dirname(__file__), "fixtures", "golden")
@@ -159,6 +159,18 @@ class XaiParityTest(ParityCase):
 class CopilotParityTest(ParityCase):
     provider = "copilot"
     legacy_snap = _snap(primary_used_pct=12.1, primary_reset_at=2000.0)
+
+    def adapter_snapshot(self):
+        return copilot.to_snapshot({
+            "copilot_plan": "individual_pro",
+            "quota_reset_date": "1970-01-01T00:33:20+00:00",
+            "quota_snapshots": {
+                "premium_interactions": {
+                    "percent_remaining": 87.9,
+                    "unlimited": False,
+                },
+            },
+        })
 
 
 class DevinParityTest(ParityCase):

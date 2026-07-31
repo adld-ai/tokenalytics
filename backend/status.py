@@ -361,24 +361,6 @@ def provider_extra(provider, snap) -> dict:
             })
         if exported:
             out["usage_windows"] = exported
-    elif provider == "copilot":
-        out["access_sku"] = extra.get("access_sku")
-        out["premium_entitlement"] = extra.get("premium_entitlement")
-        out["premium_overage"] = extra.get("premium_overage")
-        out["chat_unlimited"] = extra.get("chat_unlimited")
-        out["completions_unlimited"] = extra.get("completions_unlimited")
-        out["can_upgrade"] = extra.get("can_upgrade")
-        out["organizations"] = extra.get("organizations")
-        out["github_email"] = extra.get("github_email")
-        out["github_name"] = extra.get("github_name")
-        # plan_reset from the top-level "reset" field (quota_reset_date);
-        # plan_start derived as one month before the reset.
-        reset_date = rj.get("reset")
-        if reset_date:
-            out["plan_reset"] = iso_fmt(reset_date) or reset_date
-            start_dt = previous_month(reset_date)
-            if start_dt:
-                out["plan_start"] = start_dt.strftime("%Y-%m-%d")
     return {k: v for k, v in out.items() if v is not None}
 
 
@@ -732,15 +714,6 @@ def plan_label(provider, plan, item) -> tuple:
         return m.get(p.lower(), (p.title() or None, None))
     if provider == "claude":
         m = {"claude pro": ("Claude Pro", "$20/mo"), "claude max": ("Claude Max", "$100/mo")}
-        return m.get(p.lower(), (p or None, None))
-    if provider == "copilot":
-        m = {"free": ("Copilot Free", "$0"),
-             "individual": ("Copilot Pro", "$10/mo"),
-             "individual_pro": ("Copilot Pro", "$10/mo"),
-             "individual_proplus": ("Copilot Pro+", "$39/mo"),
-             "individual_max": ("Copilot Max", "$100/mo"),
-             "business": ("Copilot Business", "$19/user/mo"),
-             "enterprise": ("Copilot Enterprise", "$39/user/mo")}
         return m.get(p.lower(), (p or None, None))
     if provider == "antigravity":
         tid = item.get("tier_id")

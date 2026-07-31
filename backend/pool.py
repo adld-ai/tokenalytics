@@ -292,7 +292,10 @@ def _refresh_copilot(aid, a, tok):
         print(f"No GitHub token for account {aid}")
         return 1
     try:
-        result = oauth.refresh_copilot(github_token)
+        refresh = oauth.resolve_refresh("copilot")
+        if refresh is None:
+            raise RuntimeError("No refresh function for copilot")
+        result = refresh(github_token)
         raw["copilot_token"] = result.get("copilot_token", "")
         raw["copilot_expires_at"] = result.get("expires_at", 0)
         store.save_token(DB, aid, github_token, None, "",
