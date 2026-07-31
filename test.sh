@@ -3,6 +3,11 @@
 set -euo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
 mkdir -p "$DIR/build"
+for f in "$DIR"/app/*.swift; do
+  n=$(wc -l < "$f")
+  case "$(basename "$f")" in Localization.swift) max=1200;; *) max=600;; esac
+  if [ "$n" -gt "$max" ]; then echo "$f is $n lines (max $max)"; exit 1; fi
+done
 SOURCES=()
 for f in "$DIR"/app/*.swift; do
   [[ "$(basename "$f")" == AppEntry.swift ]] && continue

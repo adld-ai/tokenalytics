@@ -2,7 +2,7 @@
 from __future__ import annotations
 import calendar, json, os, re, sys, time, datetime, zoneinfo
 from pathlib import Path
-import legacy_windows, providers, store
+import legacy_windows, providers, status_writer, store
 
 STATUS_JSON = Path(os.environ.get("AGENT_POOL_STATUS_JSON",
                                     str(Path.home() / "solo/token-status-bar" / "secrets" / "status.json")))
@@ -785,21 +785,7 @@ def build_payload(conn) -> dict:
 
 def write_status(payload) -> None:
     """Atomically write one payload dict to STATUS_JSON (0o600)."""
-    STATUS_JSON.parent.mkdir(parents=True, exist_ok=True)
-    # Atomic replace so readers (Swift app polls every 30s) never see a
-    # partially written file; 0o600 keeps account data private.
-    tmp = STATUS_JSON.with_name(STATUS_JSON.name + ".tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as f:
-        f.write(json.dumps(payload, indent=2))
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp, STATUS_JSON)
-    try:
-        os.chmod(STATUS_JSON, 0o600)
-    except OSError:
-        pass
-    print(f"Wrote {STATUS_JSON} ({payload['account_count']} accounts)")
+    status_writer.write_status(STATUS_JSON, payload)
 
 
 def cmd_export(conn) -> int:
