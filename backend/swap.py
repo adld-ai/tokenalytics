@@ -17,7 +17,7 @@ values, only emails/labels/account ids.
 from __future__ import annotations
 import datetime, getpass, json, os, re, subprocess, time
 from pathlib import Path
-import store
+import providers, store
 
 # Mirrors poller.POLL_INTERVAL / status.POLL_INTERVAL_S (no import cycle).
 POLL_INTERVAL_S = int(os.environ.get("AGENT_POOL_POLL_INTERVAL", "300"))
@@ -33,7 +33,15 @@ BACKUP_DIR = Path(os.environ.get("AGENT_POOL_SWAP_BACKUPS",
                                  str(_SECRETS_DIR / "swap_backups")))
 
 DEFAULT_SETTINGS = {"auto_swap": {"codex": True, "claude": False}}
-SWAP_PROVIDERS = ("codex", "claude")
+
+
+def swap_providers() -> tuple[str, ...]:
+    """Registered providers that opt into local credential swapping."""
+    capable = {name for name in providers.names()
+               if "swap" in providers.caps(name)}
+    preferred = [name for name in DEFAULT_SETTINGS["auto_swap"]
+                 if name in capable]
+    return tuple(preferred + sorted(capable - set(preferred)))
 
 # Claude Code credential store (spec §3.4 spike findings).
 CLAUDE_KEYCHAIN_SERVICE = "Claude Code-credentials"
@@ -593,7 +601,7 @@ def auto_swap_tick(conn, payload, now=None) -> dict | None:
     items = (payload or {}).get("accounts") or []
     settings = load_settings()
     import local_sync
-    for provider in SWAP_PROVIDERS:
+    for provider in swap_providers():
         if not (settings.get("auto_swap") or {}).get(provider, False):
             continue  # kill-switch off — don't even read local state
         if provider == "claude":
@@ -628,8 +636,9 @@ def cmd_swap(conn, provider, account_db_id, force=False) -> int:
     bypasses the rails but keeps backup + atomic write + event +
     notification. Swapping onto the already-active account is always a no-op.
     """
-    if provider not in SWAP_PROVIDERS:
-        print(f"swap supports {'/'.join(SWAP_PROVIDERS)} (got: {provider})")
+    supported = swap_providers()
+    if provider not in supported:
+        print(f"swap supports {'/'.join(supported)} (got: {provider})")
         return 1
     target = store.get_account(conn, account_db_id)
     if not target or target.get("provider") != provider:

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Tests for lifecycle transition events: detection, store, daemon wiring."""
 from __future__ import annotations
-import copy, json, os, sys, tempfile, unittest
+import copy, json, os, sys, tempfile, types, unittest
 from unittest import mock
 
 _TMP = tempfile.mkdtemp(prefix="tsb-test-")
@@ -14,8 +14,38 @@ import lifecycle  # noqa: E402
 import store  # noqa: E402
 import status  # noqa: E402
 import poller  # noqa: E402
+import heartbeat  # noqa: E402
+import providers  # noqa: E402
+import swap  # noqa: E402
+from providers import util  # noqa: E402
 
 BASE = 1_000_000.0
+
+
+class CapabilitySelectionTests(unittest.TestCase):
+    def setUp(self):
+        providers.reset_cache()
+        self.addCleanup(providers.reset_cache)
+
+    def test_registered_heartbeat_provider_is_selected(self):
+        adapter = types.ModuleType("providers.fake_heartbeat")
+        adapter.PROVIDER = "fake_heartbeat"
+        adapter.AUTH = util.AUTH_NONE
+        adapter.CAPS = frozenset({"heartbeat"})
+        adapter.poll = lambda conn, account, token: None
+        providers.register(adapter)
+
+        self.assertIn("fake_heartbeat", heartbeat.heartbeat_providers())
+
+    def test_registered_swap_provider_is_selected(self):
+        adapter = types.ModuleType("providers.fake_swap")
+        adapter.PROVIDER = "fake_swap"
+        adapter.AUTH = util.AUTH_NONE
+        adapter.CAPS = frozenset({"swap"})
+        adapter.poll = lambda conn, account, token: None
+        providers.register(adapter)
+
+        self.assertIn("fake_swap", swap.swap_providers())
 
 
 def _w(kind="5h", label=None, phase="live", used=50.0, reset=BASE + 3600):

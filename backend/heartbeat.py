@@ -23,12 +23,18 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+import providers
 import store
 import work_queue
 
 PROMPT = "Reply with exactly the single lowercase word: hi. Do not add punctuation, markdown, or any other text."
 INTERVAL_S = 5 * 60 * 60  # 5 hours
-PROVIDERS = ("codex", "claude", "antigravity")
+
+
+def heartbeat_providers() -> tuple[str, ...]:
+    """Registered providers that opt into keep-alive selection."""
+    return tuple(name for name in providers.names()
+                 if "heartbeat" in providers.caps(name))
 
 CODEX_MODEL = "gpt-5.4-mini"
 CODEX_EFFORT = "low"
@@ -201,7 +207,7 @@ def run_once(conn, account_id: int | None = None) -> int:
                         if a["provider"] == "antigravity" and not a.get("disabled"))
         accounts = [
             a for a in all_accounts
-            if a["provider"] in PROVIDERS and not a.get("disabled")
+            if a["provider"] in heartbeat_providers() and not a.get("disabled")
             and (account_id is None or a["id"] == account_id)
         ]
         if not accounts:
