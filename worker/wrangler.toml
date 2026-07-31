@@ -1,0 +1,14 @@
+name = "token-bar-status"
+main = "src/index.js"
+compatibility_date = "2026-07-25"
+
+kv_namespaces = [
+  { binding = "STATUS_KV", id = "3c94f69c79cb46c7a0b6a156b5c3c675" }
+]
+
+# Inline dashboard.html as a string at build time so its client-side JS is
+# never re-escaped by a host template literal.
+[[rules]]
+type = "Text"
+globs = ["**/*.html"]
+fallthrough = true
