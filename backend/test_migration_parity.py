@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import status  # noqa: E402
 import window_history  # noqa: E402
-from providers import copilot, devin  # noqa: E402
+from providers import copilot, devin, xai  # noqa: E402
 
 
 GOLDEN_DIR = os.path.join(os.path.dirname(__file__), "fixtures", "golden")
@@ -154,6 +154,18 @@ class XaiParityTest(ParityCase):
         secondary_used_pct=0.0,
         secondary_window_s=86400,
     )
+
+    def adapter_snapshot(self):
+        return xai.to_snapshot({
+            "billing": {
+                "config": {
+                    "used": {"val": 3.17},
+                    "monthlyLimit": {"val": 100},
+                    "billingPeriodEnd": "2026-08-01T00:00:00+00:00",
+                },
+            },
+            "daily": {"primary_used_pct": 0.0},
+        })
 
 
 class CopilotParityTest(ParityCase):

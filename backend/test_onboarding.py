@@ -24,7 +24,7 @@ os.environ["AGENT_POOL_STATUS_JSON"] = str(Path(_TMP) / "status.json")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import providers, store, oauth, poller, pool, status  # noqa: E402
-from providers import copilot, devin, util  # noqa: E402
+from providers import copilot, devin, util, xai  # noqa: E402
 
 
 def _iso(ts):
@@ -228,9 +228,10 @@ class OnboardingPollTests(unittest.TestCase):
 
     # Helper: run onboarding for a provider and return the saved snapshot.
     def _onboard(self, provider):
-        if provider == "copilot":
+        if provider in ("copilot", "xai"):
+            adapter = copilot if provider == "copilot" else xai
             login_patch = mock.patch.object(
-                copilot, "LOGIN", side_effect=lambda incognito=False: _fake_login(provider))
+                adapter, "LOGIN", side_effect=lambda incognito=False: _fake_login(provider))
         else:
             login_patch = mock.patch.dict(
                 oauth.LOGIN_FUNCS,
@@ -314,12 +315,23 @@ class OnboardingPollTests(unittest.TestCase):
 
     def test_xai_subscription_data(self):
         _, snap = self._onboard("xai")
-        for f in ("monthly_used", "monthly_limit", "monthly_used_pct",
-                  "monthly_period_start", "monthly_period_end",
-                  "primary_used_pct", "primary_reset_at", "primary_window_s",
-                  "secondary_used_pct", "secondary_window_s", "rate_limit_remaining",
-                  "rate_limit_limit"):
-            self.assertIsNotNone(snap[f], f"xai snapshot missing {f}")
+        rj = json.loads(snap["raw_json"])
+        windows = {window["kind"]: window for window in rj["windows"]}
+        self.assertEqual(windows["monthly"]["label"], "credits")
+        self.assertEqual(windows["monthly"]["used_pct"], 30.0)
+        self.assertEqual(windows["monthly"]["reset_at"],
+                         "2026-02-01T00:00:00Z")
+        self.assertEqual(windows["daily"]["used_pct"], 20.0)
+        self.assertIsNotNone(windows["daily"].get("reset_at"))
+        self.assertEqual(rj["extra"]["credits_used"], 30)
+        self.assertEqual(rj["extra"]["credits_limit"], 100)
+        exported = xai.EXTRA(snap)
+        self.assertEqual(exported["credits_used"], 30)
+        self.assertEqual(exported["credits_limit"], 100)
+        self.assertEqual(exported["on_demand_cap"], 50)
+        self.assertEqual(exported["billing_period_start"], "2026-01-01 09:00")
+        self.assertEqual(exported["plan_start"], "2026-01-01 09:00")
+        self.assertEqual(exported["plan_reset"], "2026-02-01 09:00")
 
     def test_antigravity_subscription_data(self):
         _, snap = self._onboard("antigravity")
@@ -404,8 +416,7 @@ class OnboardingPollTests(unittest.TestCase):
         payload = json.loads(Path(status.STATUS_JSON).read_text())
         by_provider = {a["provider"]: a for a in payload["accounts"]}
         xai = by_provider["xai"]
-        self.assertEqual(xai["monthly_period_start"], "2026-01-01 09:00")
-        self.assertEqual(xai["monthly_period_end"], "2026-02-01 09:00")
+        self.assertEqual(xai["billing_period_start"], "2026-01-01 09:00")
         self.assertEqual(xai["plan_start"], "2026-01-01 09:00")
         self.assertEqual(xai["plan_reset"], "2026-02-01 09:00")
         devin_item = by_provider["devin"]

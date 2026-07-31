@@ -164,6 +164,9 @@ def _declared_base_kind(w) -> str:
 def _declared_kind(w) -> str:
     """Stable history key: the kind, suffixed with a slugged label when set so
     two windows of the same kind (per-model quotas) never share a row."""
+    history_kind = w.get("history_kind")
+    if isinstance(history_kind, str) and history_kind:
+        return history_kind
     base = _declared_base_kind(w)
     slug = re.sub(r"[^a-z0-9]+", "_", str(w.get("label") or "").lower()).strip("_")
     return f"{base}_{slug}" if slug else base
@@ -177,13 +180,17 @@ def _declared_used(w) -> float | None:
     return None if rem is None else max(0.0, min(100.0, 100.0 - rem))
 
 
-def _declared_reset(w) -> float | None:
-    v = w["reset_at_epoch"] if "reset_at_epoch" in w else w.get("reset_at")
+def _declared_timestamp(v) -> float | None:
     if v is None or isinstance(v, bool):
         return None
     if isinstance(v, (int, float)):
         return float(v)
     return _parse_iso_ts(v)
+
+
+def _declared_reset(w) -> float | None:
+    value = w["reset_at_epoch"] if "reset_at_epoch" in w else w.get("reset_at")
+    return _declared_timestamp(value)
 
 
 def timed_windows(provider, snap) -> list[dict]:
@@ -203,13 +210,14 @@ def timed_windows(provider, snap) -> list[dict]:
     dec = declared(snap)
     if dec is not None:
         for w in dec:
-            if not isinstance(w, dict):
+            if not isinstance(w, dict) or w.get("history") is False:
                 continue
             reset = _declared_reset(w)
             if reset is None:
                 continue
             add(_declared_kind(w), _declared_used(w), reset,
-                w.get("window_s") or WINDOW_S_BY_KIND.get(_declared_base_kind(w)))
+                w.get("window_s") or WINDOW_S_BY_KIND.get(_declared_base_kind(w)),
+                start=_declared_timestamp(w.get("start")))
         return out
 
     if provider in ("codex", "claude", "antigravity"):
@@ -244,7 +252,8 @@ def drop_windows(provider, snap) -> list[dict]:
     dec = declared(snap)
     if dec is not None:
         for w in dec:
-            if not isinstance(w, dict) or _declared_reset(w) is not None:
+            if (not isinstance(w, dict) or w.get("history") is False
+                    or _declared_reset(w) is not None):
                 continue
             used = _declared_used(w)
             if used is not None:

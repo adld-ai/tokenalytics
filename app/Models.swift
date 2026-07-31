@@ -48,11 +48,6 @@ struct Account: Codable, Identifiable {
     var rate_limit_reset: String?
     var rate_limit_limit: String?
     var plan_reset: String?
-    var monthly_used: Double?
-    var monthly_limit: Double?
-    var monthly_used_pct: Double?
-    var monthly_period_start: String?
-    var monthly_period_end: String?
     var reset_credits: [ResetCredit]?
     var last_poll: String?
     var heartbeat_status: String?
@@ -78,6 +73,8 @@ struct Account: Codable, Identifiable {
     var fable_label: String?
     var fable_status: String?
     // Grok / Antigravity / Copilot / Devin subscription details
+    var credits_used: Double?
+    var credits_limit: Double?
     var on_demand_cap: Int?
     var tier_id: String?
     var tier_description: String?

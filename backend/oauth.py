@@ -379,79 +379,6 @@ def refresh_claude(refresh_token: str) -> dict:
     }
 
 
-# ─── xAI / Grok ────────────────────────────────────────────────────────────
-XAI = {
-    "auth_url": "https://auth.x.ai/oauth2/authorize",
-    "token_url": "https://auth.x.ai/oauth2/token",
-    "client_id": "b1a00492-073a-47ea-816f-4c329264a828",
-    "scope": "openid profile email offline_access grok-cli:access api:access",
-    "port": 56121,
-}
-
-
-def login_xai(incognito: bool = False) -> dict:
-    verifier, challenge = gen_pkce()
-    state = gen_state()
-    nonce = secrets.token_hex(16)
-    redirect = f"http://127.0.0.1:{XAI['port']}/callback"
-    params = {
-        "response_type": "code",
-        "client_id": XAI["client_id"],
-        "redirect_uri": redirect,
-        "scope": XAI["scope"],
-        "code_challenge": challenge,
-        "code_challenge_method": "S256",
-        "state": state,
-        "nonce": nonce,
-        "plan": "generic",
-    }
-    auth_url = f"{XAI['auth_url']}?{urllib.parse.urlencode(params)}"
-    open_browser(auth_url, incognito)
-    print(f"Waiting for xAI callback on port {XAI['port']}...")
-    result = wait_for_callback(XAI["port"], host="127.0.0.1", path="/callback")
-    if result.get("error"):
-        raise RuntimeError(f"xAI OAuth error: {result.get('error_description', result['error'])}")
-    if result.get("state") != state:
-        raise RuntimeError("xAI OAuth state mismatch")
-    st, tok = http_post(XAI["token_url"], {
-        "grant_type": "authorization_code",
-        "client_id": XAI["client_id"],
-        "code": result["code"],
-        "redirect_uri": redirect,
-        "code_verifier": verifier,
-    })
-    if st != 200:
-        raise RuntimeError(f"xAI token exchange failed: {st} {tok}")
-    claims = decode_jwt_payload(tok.get("id_token", ""))
-    return {
-        "access_token": tok["access_token"],
-        "refresh_token": tok.get("refresh_token"),
-        "id_token": tok.get("id_token", ""),
-        "expires_at": time.time() + tok.get("expires_in", 3600),
-        "account_id": claims.get("sub", ""),
-        "email": claims.get("email", ""),
-        "plan": "",
-        "raw": tok,
-    }
-
-
-def refresh_xai(refresh_token: str) -> dict:
-    st, tok = http_post(XAI["token_url"], {
-        "grant_type": "refresh_token",
-        "client_id": XAI["client_id"],
-        "refresh_token": refresh_token,
-    })
-    if st != 200:
-        raise RuntimeError(f"xAI refresh failed: {st} {tok}")
-    return {
-        "access_token": tok["access_token"],
-        "refresh_token": tok.get("refresh_token", refresh_token),
-        "id_token": tok.get("id_token", ""),
-        "expires_at": time.time() + tok.get("expires_in", 3600),
-        "raw": tok,
-    }
-
-
 # ─── Antigravity (Google OAuth) ────────────────────────────────────────────
 # Google OAuth credentials are loaded from a gitignored file
 # (secrets/antigravity.env) so they are never committed. Env vars override
@@ -580,14 +507,12 @@ def refresh_antigravity(refresh_token: str) -> dict:
 LOGIN_FUNCS = {
     "codex": login_codex,
     "claude": login_claude,
-    "xai": login_xai,
     "antigravity": login_antigravity,
 }
 
 REFRESH_FUNCS = {
     "codex": refresh_codex,
     "claude": refresh_claude,
-    "xai": refresh_xai,
     "antigravity": refresh_antigravity,
 }
 
@@ -712,46 +637,6 @@ def _exchange_claude(code: str, state: str, verifier: str) -> dict:
     }
 
 
-def _authorize_xai(state: str, challenge: str) -> str:
-    redirect = f"http://127.0.0.1:{XAI['port']}/callback"
-    params = {
-        "response_type": "code",
-        "client_id": XAI["client_id"],
-        "redirect_uri": redirect,
-        "scope": XAI["scope"],
-        "code_challenge": challenge,
-        "code_challenge_method": "S256",
-        "state": state,
-        "nonce": secrets.token_hex(16),
-        "plan": "generic",
-    }
-    return f"{XAI['auth_url']}?{urllib.parse.urlencode(params)}"
-
-
-def _exchange_xai(code: str, state: str, verifier: str) -> dict:
-    redirect = f"http://127.0.0.1:{XAI['port']}/callback"
-    st, tok = http_post(XAI["token_url"], {
-        "grant_type": "authorization_code",
-        "client_id": XAI["client_id"],
-        "code": code,
-        "redirect_uri": redirect,
-        "code_verifier": verifier,
-    })
-    if st != 200:
-        raise RuntimeError(f"xAI token exchange failed: {st} {tok}")
-    claims = decode_jwt_payload(tok.get("id_token", ""))
-    return {
-        "access_token": tok["access_token"],
-        "refresh_token": tok.get("refresh_token"),
-        "id_token": tok.get("id_token", ""),
-        "expires_at": time.time() + tok.get("expires_in", 3600),
-        "account_id": claims.get("sub", ""),
-        "email": claims.get("email", ""),
-        "plan": "",
-        "raw": tok,
-    }
-
-
 def _authorize_antigravity(state: str, challenge: str) -> str:
     _ensure_antigravity_creds()
     if not ANTIGRAVITY["client_id"] or not ANTIGRAVITY["client_secret"]:
@@ -809,8 +694,6 @@ BROWSER_FLOWS: dict[str, dict] = {
               "pkce": True, "authorize": _authorize_codex, "exchange": _exchange_codex},
     "claude": {"host": "localhost", "port": CLAUDE["port"], "path": "/callback",
                "pkce": True, "authorize": _authorize_claude, "exchange": _exchange_claude},
-    "xai": {"host": "127.0.0.1", "port": XAI["port"], "path": "/callback",
-            "pkce": True, "authorize": _authorize_xai, "exchange": _exchange_xai},
     "antigravity": {"host": "localhost", "port": ANTIGRAVITY["port"], "path": "/oauth-callback",
                     "pkce": False, "authorize": _authorize_antigravity, "exchange": _exchange_antigravity},
 }

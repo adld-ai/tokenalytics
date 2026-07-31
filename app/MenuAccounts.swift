@@ -146,6 +146,15 @@ extension AppDelegate {
         return "\(windowLabel(window)): \(pct)% \(t("used"))"
     }
 
+    private func windowResetText(_ window: WindowInfo?) -> String? {
+        guard let reset = window?.reset_at_epoch else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "Asia/Seoul")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        return formatter.string(from: Date(timeIntervalSince1970: reset))
+    }
+
     private func limitSessionGroup(_ acct: Account) -> [AccountSubmenuRow] {
         let windows = acct.windows ?? []
         guard !windows.isEmpty || acct.credits_balance != nil else { return [] }
@@ -267,10 +276,11 @@ extension AppDelegate {
             }
         }
         if acct.provider == "xai" {
-            if let used = acct.monthly_used, let limit = acct.monthly_limit {
+            if let used = acct.credits_used, let limit = acct.credits_limit {
                 lines.append("\(t("monthly")): \(Int(used))/\(Int(limit)) \(t("credits"))")
             }
-            if let reset = acct.primary_reset ?? acct.monthly_period_end {
+            let monthly = (acct.windows ?? []).first(where: { $0.kind == "monthly" })
+            if let reset = windowResetText(monthly) ?? acct.plan_reset {
                 lines.append("  \(t("reset")): \(reset)")
             }
         }

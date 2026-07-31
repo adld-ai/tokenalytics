@@ -4,7 +4,6 @@
 Limit sources:
   codex:        chatgpt.com/backend-api/wham/usage + /wham/rate-limit-reset-credits
   claude:       api.anthropic.com/api/oauth/usage (five_hour/seven_day/limits[])
-  xai:          cli-chat-proxy.grok.com/v1/billing (monthly credits) + api.x.ai chat headers (daily)
   antigravity:  cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels (per-model remainingFraction)
   copilot:      api.github.com/copilot_internal/user (quota_snapshots.premium_interactions)
 
@@ -323,150 +322,6 @@ def _claude_profile(token):
     }
 
 
-# ─── xAI headers ───────────────────────────────────────────────────────────
-def poll_xai(conn, account, token):
-    # Step 1: Query the billing API for monthly credit usage
-    # cli-chat-proxy.grok.com/v1/billing returns real-time monthly usage
-    at = token["access_token"]
-    snap = {}
-    try:
-        req = urllib.request.Request("https://cli-chat-proxy.grok.com/v1/billing", method="GET")
-        req.add_header("Authorization", f"Bearer {at}")
-        req.add_header("X-XAI-Token-Auth", "xai-grok-cli")
-        with urllib.request.urlopen(req, timeout=15) as r:
-            resp = json.loads(r.read())
-        if not isinstance(resp, dict):
-            snap = _shape_error("billing", resp)
-        else:
-            config = resp.get("config", {})
-            used = config.get("used", {}).get("val", 0)
-            limit = config.get("monthlyLimit", {}).get("val", 0)
-            period_end = config.get("billingPeriodEnd", "")
-            period_start = config.get("billingPeriodStart", "")
-            pct = (used / limit * 100) if limit > 0 else 0
-            snap["monthly_used"] = used
-            snap["monthly_limit"] = limit
-            snap["monthly_used_pct"] = pct
-            snap["monthly_period_start"] = period_start
-            snap["monthly_period_end"] = period_end
-            # Parse the period end into a reset timestamp
-            import datetime as dt
-            try:
-                reset_dt = dt.datetime.fromisoformat(period_end.replace("Z", "+00:00"))
-                snap["primary_reset_at"] = reset_dt.timestamp()
-            except Exception:
-                pass
-            snap["primary_used_pct"] = pct
-            snap["primary_window_s"] = 2592000  # ~30 days
-            snap["rate_limit_remaining"] = f"{limit - used} credits"
-            snap["rate_limit_limit"] = f"{limit} credits/month"
-            snap["rate_limit_reset"] = period_end[:10] if period_end else "monthly"
-            snap["status"] = "active"
-            snap["status_message"] = ""
-            snap["raw_json"] = json.dumps({"extra": {
-                "credits_used": used,
-                "credits_limit": limit,
-                "on_demand_cap": config.get("onDemandCap", {}).get("val"),
-                "period_start": period_start,
-                "period_end": period_end,
-            }})
-    except urllib.error.HTTPError as e:
-        msg = e.read().decode(errors="replace")[:120]
-        snap = {"status": "error", "status_message": f"billing HTTP {e.code}: {msg}"}
-    except urllib.error.URLError as e:
-        snap = {"status": "error", "status_message": str(e.reason)}
-    except json.JSONDecodeError as e:
-        snap = _shape_error("billing", f"invalid JSON: {e}")
-
-    # Step 2: Also probe the chat API for daily rate-limit headers
-    body = json.dumps({
-        "model": "grok-4",
-        "max_tokens": 1,
-        "messages": [{"role": "user", "content": "hi"}],
-    }).encode()
-    req = urllib.request.Request("https://api.x.ai/v1/chat/completions", data=body, method="POST")
-    req.add_header("Content-Type", "application/json")
-    req.add_header("Authorization", f"Bearer {at}")
-    try:
-        with urllib.request.urlopen(req, timeout=15) as r:
-            hdrs = dict(r.headers)
-            daily = _xai_snap(hdrs, "active", "")
-            # Merge daily rate-limit data as secondary window
-            if "primary_used_pct" in daily:
-                snap["secondary_used_pct"] = daily["primary_used_pct"]
-                snap["secondary_window_s"] = 86400
-                if daily.get("primary_reset_at"):
-                    snap["secondary_reset_at"] = daily["primary_reset_at"]
-            if "rate_limit_remaining" in daily:
-                snap["daily_remaining"] = daily["rate_limit_remaining"]
-    except urllib.error.HTTPError as e:
-        hdrs = dict(e.headers)
-        msg = e.read().decode(errors="replace")[:120]
-        if e.code == 429:
-            daily = _xai_snap(hdrs, "rate_limited", f"429: {msg}")
-            snap["secondary_used_pct"] = daily.get("primary_used_pct", 100.0)
-            snap["secondary_window_s"] = 86400
-            if daily.get("primary_reset_at"):
-                snap["secondary_reset_at"] = daily["primary_reset_at"]
-            if snap["status"] == "active":
-                snap["status"] = "rate_limited"
-                snap["status_message"] = "daily rate limited"
-        # Don't override error status from billing
-    except urllib.error.URLError as e:
-        pass  # Daily probe is best-effort
-
-    store.save_snapshot(conn, account["id"], snap)
-    store.log_event(conn, account["id"], "limit_poll", snap["status"] == "active", snap.get("status_message", ""))
-
-
-def _xai_snap(hdrs, status, msg):
-    raw = {k: v for k, v in hdrs.items() if "ratelimit" in k.lower()}
-    snap = {"status": status, "status_message": msg, "raw_json": json.dumps(raw)}
-    # xAI exposes per-day request + token limits via headers.
-    # Monthly limits exist (tier-based spend) but are NOT exposed via API headers.
-    # Request-based rate limit (per-day window)
-    limit_req = hdrs.get("x-ratelimit-limit-requests")
-    remaining_req = hdrs.get("x-ratelimit-remaining-requests")
-    if limit_req and remaining_req:
-        lim = float(limit_req)
-        rem = float(remaining_req)
-        used = lim - rem
-        snap["primary_used_pct"] = (used / lim * 100) if lim > 0 else 0
-        snap["primary_window_s"] = 86400  # 24h
-        snap["rate_limit_limit"] = str(int(lim))
-        snap["rate_limit_remaining"] = str(int(rem))
-    # Token-based rate limit (per-day)
-    limit_tok = hdrs.get("x-ratelimit-limit-tokens")
-    remaining_tok = hdrs.get("x-ratelimit-remaining-tokens")
-    if limit_tok and remaining_tok:
-        lim = float(limit_tok)
-        rem = float(remaining_tok)
-        used = lim - rem
-        snap["secondary_used_pct"] = (used / lim * 100) if lim > 0 else 0
-        snap["secondary_window_s"] = 86400
-    # Reset timestamp (xAI returns a human-readable string like "1h23m45s" or "1d")
-    reset_req = hdrs.get("x-ratelimit-reset-requests")
-    if reset_req:
-        snap["rate_limit_reset"] = reset_req
-        # Try to parse as duration for primary_reset_at
-        snap["primary_reset_at"] = _xai_parse_reset(reset_req)
-    else:
-        snap["rate_limit_reset"] = "daily"
-    return snap
-
-
-def _xai_parse_reset(s):
-    """Parse xAI reset string like '1h23m45s' or '23h59m' into epoch time."""
-    import re
-    total = 0
-    m = re.match(r'(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?', s)
-    if m:
-        d, h, mi, se = m.groups()
-        if d: total += int(d) * 86400
-        if h: total += int(h) * 3600
-        if mi: total += int(mi) * 60
-        if se: total += int(se)
-    return time.time() + total if total > 0 else None
 
 
 # ─── Antigravity / Google quota ────────────────────────────────────────────
@@ -617,7 +472,6 @@ def _antigravity_quota(models, plan):
 POLLERS = {
     "codex": poll_codex,
     "claude": poll_claude,
-    "xai": poll_xai,
     "antigravity": poll_antigravity,
 }
 

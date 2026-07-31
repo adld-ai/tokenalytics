@@ -53,7 +53,7 @@ extension AppDelegate {
             if raw.contains("heavy") { return "SuperGrok Heavy" }
             if raw.contains("super") { return "SuperGrok" }
             if raw.contains("free") { return "Free" }
-            if let limit = acct.monthly_limit {
+            if let limit = acct.credits_limit {
                 if limit >= 30000 { return "SuperGrok Heavy" }
                 if limit >= 15000 { return "SuperGrok" }
                 return "Free"
@@ -205,7 +205,7 @@ extension AppDelegate {
     }
 
     func planStartText(_ acct: Account) -> String? {
-        let start = acct.plan_start ?? acct.monthly_period_start
+        let start = acct.plan_start
         if let start, !start.isEmpty {
             return L10n.label("plan_started", start)
         }
@@ -226,7 +226,7 @@ extension AppDelegate {
                 end = nil
             }
         } else {
-            end = acct.plan_reset ?? acct.monthly_period_end
+            end = acct.plan_reset
         }
         if let end, !end.isEmpty {
             if acct.provider == "codex", acct.is_active_subscription_gratis == true {
@@ -263,8 +263,11 @@ extension AppDelegate {
     }
 
     func monthlyResetEndsSoon(_ acct: Account) -> Bool {
-        guard hasMonthlyQuota(acct), acct.primary_used_pct != nil else { return false }
-        return quotaResetHoursLeft(acct.primary_reset) != nil
+        guard hasMonthlyQuota(acct),
+              let reset = (acct.windows ?? []).first(where: { $0.kind == "monthly" })?.reset_at_epoch
+        else { return false }
+        let hours = Date(timeIntervalSince1970: reset).timeIntervalSinceNow / 3600.0
+        return hours > 0 && hours <= 24
     }
 
     func weeklyQuotaLow(_ acct: Account) -> Bool {
@@ -273,7 +276,10 @@ extension AppDelegate {
     }
 
     func monthlyQuotaLow(_ acct: Account) -> Bool {
-        guard hasMonthlyQuota(acct), let used = acct.primary_used_pct else { return false }
+        guard hasMonthlyQuota(acct),
+              let window = (acct.windows ?? []).first(where: { $0.kind == "monthly" }),
+              let used = window.used_pct_effective ?? window.used_pct
+        else { return false }
         return used > 80
     }
 

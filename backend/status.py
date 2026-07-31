@@ -339,12 +339,7 @@ def provider_extra(provider, snap) -> dict:
     if not isinstance(extra, dict):
         return {}
     out: dict = {}
-    if provider == "xai":
-        out["on_demand_cap"] = extra.get("on_demand_cap")
-        out["billing_period_start"] = iso_fmt(extra.get("period_start"))
-        out["plan_start"] = iso_fmt(extra.get("period_start"))
-        out["plan_reset"] = iso_fmt(extra.get("period_end"))
-    elif provider == "antigravity":
+    if provider == "antigravity":
         out["tier_id"] = extra.get("tier_id")
         out["tier_description"] = extra.get("tier_description")
         out["active_tier"] = extra.get("active_tier")
@@ -735,8 +730,6 @@ def plan_label(provider, plan, item) -> tuple:
              "free-tier": ("Free", "$0"),
              "standard-tier": ("Antigravity", None)}
         return m.get(tid, (p or None, None))
-    if provider == "xai":
-        return (p or None, None)
     return (p or None, None)
 
 
