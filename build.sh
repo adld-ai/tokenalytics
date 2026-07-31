@@ -26,7 +26,7 @@ PY_CACHE="$BUILD_DIR/python-standalone"
 echo "Building $APP_NAME..."
 mkdir -p "$BUILD_DIR"
 swiftc -framework Cocoa -framework SwiftUI \
-  "$DIR/app/TokenStatusBar.swift" \
+  "$DIR/app/"*.swift \
   -o "$BUILD_DIR/$APP_NAME" \
   -parse-as-library \
   2>&1
