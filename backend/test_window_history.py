@@ -420,6 +420,19 @@ class DashboardTests(unittest.TestCase):
         self.assertNotIn("src='http", html)
         self.assertNotIn("@import", html)
 
+    def test_generate_uses_actual_payload_providers(self):
+        conn = store.connect()
+        provider = f"dashboard-provider-{id(self)}"
+        acct_id = store.upsert_account(conn, provider, "local", "dashboard fake")
+        store.save_window_history(conn, acct_id, "weekly", BASE - 604800,
+                                  BASE, 25.0, BASE - 60, "natural", {})
+
+        html = dashboard.generate(conn).read_text()
+
+        prov_line = next(line for line in html.splitlines()
+                         if line.startswith("const PROV ="))
+        self.assertIn(f'"{provider}"', prov_line)
+
     def test_generate_includes_verified_public_reset_archive(self):
         conn = store.connect()
         path = dashboard.generate(conn)

@@ -7,6 +7,7 @@ demand via `pool.py dashboard [--open]`, never on ordinary poll ticks.
 from __future__ import annotations
 import datetime
 import json
+import providers
 import reset_announcements
 import store
 import window_history
@@ -67,6 +68,13 @@ def dashboard_data(conn) -> list[dict]:
                 "ongoing": True,
             })
     return rows
+
+
+def provider_order(rows: list[dict]) -> list[str]:
+    """Providers present in the payload, with registered adapters first."""
+    actual = list(dict.fromkeys(row["provider"] for row in rows))
+    registered = [name for name in providers.names() if name in actual]
+    return registered + [name for name in actual if name not in registered]
 
 
 def _coupon_status(row: dict, now: datetime.datetime | None = None) -> str:
@@ -150,7 +158,9 @@ def generate(conn):
     """Write history/dashboard.html and return its path."""
     window_history.ensure_history_dir()
     path = HISTORY_DIR / "dashboard.html"
-    data = json.dumps(dashboard_data(conn)).replace("</", "<\\/")
+    rows = dashboard_data(conn)
+    data = json.dumps(rows).replace("</", "<\\/")
+    provider_names = json.dumps(provider_order(rows)).replace("</", "<\\/")
     coupons = json.dumps(coupon_data(conn)).replace("</", "<\\/")
     accounts = json.dumps(account_data(conn)).replace("</", "<\\/")
     banked_rows = [
@@ -165,6 +175,7 @@ def generate(conn):
     reset_posts = json.dumps(reset_rows).replace("</", "<\\/")
     reset_notes = json.dumps(reset_announcements.RESET_NOTES).replace("</", "<\\/")
     html = _HTML_TEMPLATE.replace("/*__DATA__*/[]", data)
+    html = html.replace("/*__PROVIDERS__*/[]", provider_names)
     html = html.replace("/*__COUPONS__*/[]", coupons)
     html = html.replace("/*__ACCOUNTS__*/[]", accounts)
     html = html.replace("/*__BANKED__*/[]", banked)
@@ -379,9 +390,9 @@ const RESET_NOTES = /*__RESET_NOTES__*/[];
 const COUPON_STATES = ["available", "redeemed", "expired", "gone"];
 const couponVar = s => "var(" + (COUPON_STATES.includes(s) ? "--coupon-" + s : "--coupon-gone") + ")";
 const SVGNS = "http://www.w3.org/2000/svg";
-const PROV = ["codex", "claude", "xai", "antigravity", "copilot", "devin"];
+const PROV = /*__PROVIDERS__*/[];
 const CAUSES = ["natural", "coupon", "provider_reset", "unknown", "ongoing"];
-const provVar = p => "var(" + (PROV.includes(p) ? "--prov-" + p : "--prov-other") + ")";
+const provVar = p => "var(--prov-" + p + ", var(--prov-other))";
 const causeVar = c => "var(" + (CAUSES.includes(c) ? "--cause-" + c : "--cause-unknown") + ")";
 
 function svgEl(name, attrs) {
