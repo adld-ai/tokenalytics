@@ -6,7 +6,7 @@ timestamp. Keep source URLs primary even when a secondary monitor is used to
 discover a new post.
 """
 
-AS_OF_UTC = "2026-07-23 12:01:00"
+AS_OF_UTC = "2026-07-27 03:58:39"
 POLICY_URL = "https://help.openai.com/en/articles/20001271-codex-referral-promotions"
 
 
@@ -227,6 +227,13 @@ RESET_POSTS = [
         "source_url": "https://x.com/thsottiaux/status/2075820987833274448",
     },
     {
+        "posted_at_utc": "2026-07-12 17:59:57",
+        "kind": "Hard reset",
+        "audience": "Paid Work and Codex users",
+        "summary": "Six-million-user reset accompanied by a temporary removal of the five-hour restriction.",
+        "source_url": "https://x.com/thsottiaux/status/2076365965915467978",
+    },
+    {
         "posted_at_utc": "2026-07-12 21:28:59",
         "kind": "Banked reset",
         "audience": "500K users",
@@ -267,6 +274,13 @@ RESET_POSTS = [
         "audience": "Paid Work and Codex users",
         "summary": "Ten-million-active-users reset, announced to land within the next hour.",
         "source_url": "https://x.com/thsottiaux/status/2079609157934886975",
+    },
+    {
+        "posted_at_utc": "2026-07-25 19:17:12",
+        "kind": "Hard reset",
+        "audience": "All Work and Codex users",
+        "summary": "Completed compensation reset after an almost-global outage earlier that day.",
+        "source_url": "https://x.com/thsottiaux/status/2081096447718723984",
     },
 ]
 
