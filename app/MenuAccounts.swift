@@ -114,12 +114,11 @@ extension AppDelegate {
     }
 
     private func statusGroup(_ acct: Account) -> [AccountSubmenuRow] {
-        let na = t("na")
         var rows: [AccountSubmenuRow] = [.groupHeader(t("status"))]
-        rows.append(.info(planText(acct) ?? L10n.label("plan", na)))
+        if let plan = planText(acct) { rows.append(.info(plan)) }
         if let line = subscriptionLine(acct) { rows.append(.info(line)) }
-        rows.append(.info(planStartText(acct) ?? L10n.label("plan_started", na)))
-        rows.append(.info(planResetText(acct) ?? L10n.label("plan_resets", na)))
+        if let start = planStartText(acct) { rows.append(.info(start)) }
+        if let reset = planResetText(acct) { rows.append(.info(reset)) }
         if acct.provider == "codex" {
             if let created = acct.account_created, !created.isEmpty {
                 rows.append(.info(L10n.label("account_created", created)))
@@ -128,8 +127,12 @@ extension AppDelegate {
                 rows.append(.info(L10n.label("payment_history", history)))
             }
         }
-        rows.append(.info(L10n.label("token_expires", acct.token_expires ?? na)))
-        rows.append(.info(L10n.label("last_poll", acct.last_poll ?? na)))
+        if let expires = acct.token_expires, !expires.isEmpty {
+            rows.append(.info(L10n.label("token_expires", expires)))
+        }
+        if let poll = acct.last_poll, !poll.isEmpty {
+            rows.append(.info(L10n.label("last_poll", poll)))
+        }
         return rows
     }
 

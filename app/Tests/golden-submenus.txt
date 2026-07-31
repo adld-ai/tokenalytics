@@ -111,9 +111,6 @@ Delete This Agent
 Status
 Plan: coding-plan
 coding-plan · paid
-Plan started: n/a
-Plan resets: n/a
-Token expires: n/a
 Last poll: 2026-07-31 08:54
 <separator>
 Limit session
