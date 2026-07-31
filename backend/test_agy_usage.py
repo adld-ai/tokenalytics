@@ -2,13 +2,14 @@
 """Tests for the agy /usage panel parser."""
 from __future__ import annotations
 import os, sys, tempfile, unittest
+from unittest import mock
 
 _TMP = tempfile.mkdtemp(prefix="tsb-test-")
 os.environ["AGENT_POOL_DB"] = os.path.join(_TMP, "pool.db")
 os.environ["AGENT_POOL_STATUS_JSON"] = os.path.join(_TMP, "status.json")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import agy_usage  # noqa: E402
+from providers import antigravity as agy_usage  # noqa: E402
 
 PANEL = """\
 └ Models & Quota
@@ -84,7 +85,27 @@ class ParseUsagePanelTests(unittest.TestCase):
 
 
 import json
-import status  # noqa: E402
+
+
+class AdapterSnapshotTests(unittest.TestCase):
+    def test_model_window_keeps_legacy_history_key(self):
+        snap = agy_usage.to_snapshot({
+            "code_assist": {
+                "currentTier": {"id": "standard-tier", "name": "Antigravity"},
+            },
+            "models": {
+                "gemini-3-pro": {
+                    "displayName": "Gemini 3 Pro",
+                    "quotaInfo": {
+                        "remainingFraction": 0.75,
+                        "resetTime": "2026-01-02T00:00:00Z",
+                    },
+                },
+            },
+        })
+        window = json.loads(snap["raw_json"])["windows"][0]
+        self.assertEqual(window["kind"], "model_weekly")
+        self.assertEqual(window["history_kind"], "5h")
 
 
 class ExportShapeTests(unittest.TestCase):
@@ -98,7 +119,7 @@ class ExportShapeTests(unittest.TestCase):
                  "remaining_pct": 100.0, "reset_at": None},
             ],
         }})}
-        out = status.provider_extra("antigravity", snap)
+        out = agy_usage.EXTRA(snap)
         self.assertEqual(len(out["usage_windows"]), 2)
         g5 = out["usage_windows"][0]
         self.assertEqual(g5["group"], "gemini")
@@ -108,6 +129,29 @@ class ExportShapeTests(unittest.TestCase):
         ow = out["usage_windows"][1]
         self.assertEqual(ow["used_pct"], 0.0)
         self.assertIsNone(ow["reset"])
+
+
+class RefreshCredentialTests(unittest.TestCase):
+    def test_refresh_reloads_rotated_client_credentials(self):
+        original = dict(agy_usage.ANTIGRAVITY)
+        self.addCleanup(agy_usage.ANTIGRAVITY.update, original)
+        agy_usage.ANTIGRAVITY["client_id"] = "stale-id"
+        agy_usage.ANTIGRAVITY["client_secret"] = "stale-secret"
+        token_body = {"access_token": "new-access", "expires_in": 3600}
+
+        with mock.patch.object(
+            agy_usage,
+            "_load_antigravity_creds",
+            return_value=("rotated-id", "rotated-secret"),
+        ), mock.patch.object(
+            agy_usage.oauth, "http_post", return_value=(200, token_body)
+        ) as post:
+            result = agy_usage.REFRESH("refresh-token")
+
+        request = post.call_args.args[1]
+        self.assertEqual(request["client_id"], "rotated-id")
+        self.assertEqual(request["client_secret"], "rotated-secret")
+        self.assertEqual(result["access_token"], "new-access")
 
 
 if __name__ == "__main__":

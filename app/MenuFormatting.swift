@@ -33,13 +33,6 @@ extension AppDelegate {
             }
             return acct.plan
         case "antigravity":
-            if override.contains("ultra") || override.contains("20x") || override.contains("5x") {
-                if override.contains("20x") || override.contains("20") { return "Ultra 20x" }
-                if override.contains("5x") || override.contains("5") { return "Ultra 5x" }
-                return "Ultra"
-            }
-            if override.contains("pro") { return "Pro" }
-            if override.contains("plus") { return "Plus" }
             if raw.contains("free") { return "Free" }
             if raw.contains("plus") { return "Plus" }
             if raw.contains("ultra") {

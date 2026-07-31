@@ -4,7 +4,6 @@
 Limit sources:
   codex:        chatgpt.com/backend-api/wham/usage + /wham/rate-limit-reset-credits
   claude:       api.anthropic.com/api/oauth/usage (five_hour/seven_day/limits[])
-  antigravity:  cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels (per-model remainingFraction)
   copilot:      api.github.com/copilot_internal/user (quota_snapshots.premium_interactions)
 
 The providers listed above predate the adapter registry and stay hand-written
@@ -320,159 +319,10 @@ def _claude_profile(token):
         "org_name": org.get("name"),
         "member_since": acct.get("created_at"),
     }
-
-
-
-
-# ─── Antigravity / Google quota ────────────────────────────────────────────
-def poll_antigravity(conn, account, token):
-    # Step 1: loadCodeAssist to get tier info + project ID
-    url = "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist"
-    body = json.dumps({"metadata": {}}).encode()
-    req = urllib.request.Request(url, data=body, method="POST")
-    req.add_header("Content-Type", "application/json")
-    req.add_header("Authorization", f"Bearer {token['access_token']}")
-    req.add_header("Accept", "*/*")
-    req.add_header("User-Agent", "antigravity/cli/1.0.13 (aidev_client; os_type=darwin; arch=arm64)")
-    try:
-        with urllib.request.urlopen(req, timeout=15) as r:
-            resp = json.loads(r.read())
-    except urllib.error.HTTPError as e:
-        msg = e.read().decode(errors="replace")[:120]
-        snap = {"status": "error", "status_message": f"loadCodeAssist HTTP {e.code}: {msg}"}
-        store.save_snapshot(conn, account["id"], snap)
-        store.log_event(conn, account["id"], "limit_poll", False, snap["status_message"])
-        return
-    except urllib.error.URLError as e:
-        snap = {"status": "error", "status_message": str(e.reason)}
-        store.save_snapshot(conn, account["id"], snap)
-        store.log_event(conn, account["id"], "limit_poll", False, snap["status_message"])
-        return
-    except json.JSONDecodeError as e:
-        snap = _shape_error("loadCodeAssist", f"invalid JSON: {e}")
-        store.save_snapshot(conn, account["id"], snap)
-        store.log_event(conn, account["id"], "limit_poll", False, snap["status_message"])
-        return
-    if not isinstance(resp, dict):
-        snap = _shape_error("loadCodeAssist", resp)
-        store.save_snapshot(conn, account["id"], snap)
-        store.log_event(conn, account["id"], "limit_poll", False, snap["status_message"])
-        return
-    current = resp.get("currentTier", {})
-    paid = resp.get("paidTier") or {}
-    allowed = resp.get("allowedTiers") or []
-    # The session's active Code Assist tier is currentTier (often free-tier),
-    # but the user's actual entitlement lives in paidTier. Prefer paidTier.
-    tier = paid if paid.get("id") else current
-    if not tier.get("id") and allowed:
-        tier = allowed[0]
-    plan = tier.get("name", "Gemini Code Assist")
-    tier_id = tier.get("id")
-    tier_desc = tier.get("description")
-    active_tier_id = current.get("id")
-    project = resp.get("cloudaicompanionProject", "")
-
-    # Step 2: fetch real-time per-model quota via fetchAvailableModels.
-    # Response: models[<key>].quotaInfo.remainingFraction (0..1) + .resetTime (ISO8601).
-    # This is a metadata call — it reports quota without consuming a request.
-    models_url = "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels"
-    payload = json.dumps({"project": project}).encode()
-    req = urllib.request.Request(models_url, data=payload, method="POST")
-    req.add_header("Content-Type", "application/json")
-    req.add_header("Authorization", f"Bearer {token['access_token']}")
-    req.add_header("Accept", "*/*")
-    req.add_header("User-Agent", "antigravity")
-
-    snap = {"status": "active", "status_message": "", "plan": plan}
-    try:
-        with urllib.request.urlopen(req, timeout=20) as r:
-            resp = json.loads(r.read())
-        if isinstance(resp, dict):
-            snap.update(_antigravity_quota(resp.get("models") or {}, plan))
-        else:
-            snap["status"] = "error"
-            snap["status_message"] = f"fetchAvailableModels: unexpected response shape: {str(resp)[:120]}"
-    except urllib.error.HTTPError as e:
-        body_resp = e.read().decode(errors="replace")[:120]
-        snap["status"] = "error"
-        snap["status_message"] = f"fetchAvailableModels HTTP {e.code}: {body_resp}"
-    except urllib.error.URLError as e:
-        snap["status"] = "error"
-        snap["status_message"] = str(e.reason)
-    except json.JSONDecodeError as e:
-        snap["status"] = "error"
-        snap["status_message"] = f"fetchAvailableModels: invalid JSON: {e}"
-
-    try:
-        import agy_usage
-        usage_windows = agy_usage.fetch_usage()
-    except Exception:
-        usage_windows = None
-
-    snap["raw_json"] = json.dumps({"extra": {
-        "tier_id": tier_id,
-        "tier_description": tier_desc,
-        "active_tier": active_tier_id if active_tier_id and active_tier_id != tier_id else None,
-        "usage_windows": usage_windows,
-    }})
-    store.save_snapshot(conn, account["id"], snap)
-    store.log_event(conn, account["id"], "limit_poll", snap["status"] == "active", snap.get("status_message", ""))
-
-
-def _antigravity_quota(models, plan):
-    """Reduce per-model quotaInfo to a single most-constrained window.
-
-    Skips internal/non-chat models (tab completion, chat_* internal ids,
-    legacy gemini 2.5, and image models) and reports the model with the
-    least remaining quota as the headline usage number.
-    """
-    worst = None  # (remainingFraction, resetTime, label)
-    for key, info in models.items():
-        qi = info.get("quotaInfo")
-        if not qi:
-            continue
-        label = info.get("displayName") or key
-        low = label.lower()
-        if (low.startswith("chat_") or low.startswith("rev19")
-                or low.startswith("tab_") or "gemini 2.5" in low or "image" in low):
-            continue
-        frac = qi.get("remainingFraction")
-        if frac is None:
-            continue
-        if worst is None or frac < worst[0]:
-            worst = (frac, qi.get("resetTime"), label)
-
-    if worst is None:
-        return {"primary_used_pct": 0.0, "rate_limit_remaining": "available",
-                "rate_limit_limit": plan, "rate_limit_reset": "unknown"}
-
-    frac, reset_iso, label = worst
-    used = max(0.0, min(100.0, (1.0 - frac) * 100.0))
-    out = {
-        "primary_used_pct": used,
-        "primary_window_s": 0,
-        "rate_limit_limit": plan,
-        "rate_limit_remaining": f"{frac * 100:.0f}% left ({label})",
-    }
-    if reset_iso:
-        try:
-            out["primary_reset_at"] = datetime.datetime.fromisoformat(
-                reset_iso.replace("Z", "+00:00")).timestamp()
-        except ValueError:
-            pass
-    else:
-        out["rate_limit_reset"] = "rolling"
-    if frac <= 0:
-        out["status"] = "rate_limited"
-        out["status_message"] = "quota exhausted"
-    return out
-
-
 # ─── dispatch ──────────────────────────────────────────────────────────────
 POLLERS = {
     "codex": poll_codex,
     "claude": poll_claude,
-    "antigravity": poll_antigravity,
 }
 
 
@@ -503,10 +353,6 @@ def _refresh_if_needed(conn, account, token):
                 token = store.get_token(conn, account["id"]) or token
                 if not (token.get("expires_at") and token["expires_at"] - time.time() < 3600):
                     return token
-                if provider == "antigravity":
-                    client_id, client_secret = oauth._load_antigravity_creds()
-                    oauth.ANTIGRAVITY["client_id"] = client_id
-                    oauth.ANTIGRAVITY["client_secret"] = client_secret
                 result = refresh(token["refresh_token"])
                 store.save_token(conn, account["id"], result["access_token"],
                                  result.get("refresh_token"), result.get("id_token"),

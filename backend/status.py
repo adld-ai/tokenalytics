@@ -338,25 +338,7 @@ def provider_extra(provider, snap) -> dict:
     extra = rj.get("extra") or {}
     if not isinstance(extra, dict):
         return {}
-    out: dict = {}
-    if provider == "antigravity":
-        out["tier_id"] = extra.get("tier_id")
-        out["tier_description"] = extra.get("tier_description")
-        out["active_tier"] = extra.get("active_tier")
-        exported = []
-        for w in extra.get("usage_windows") or []:
-            if not isinstance(w, dict) or w.get("remaining_pct") is None:
-                continue
-            used = 100.0 - float(w["remaining_pct"])
-            exported.append({
-                "group": w.get("group"),
-                "window": w.get("window"),
-                "used_pct": round(max(0.0, min(100.0, used)), 2),
-                "reset": ts_fmt(w["reset_at"]) if w.get("reset_at") else None,
-            })
-        if exported:
-            out["usage_windows"] = exported
-    return {k: v for k, v in out.items() if v is not None}
+    return {}
 
 
 # ─── unified window model ───────────────────────────────────────────────────
@@ -710,26 +692,6 @@ def plan_label(provider, plan, item) -> tuple:
     if provider == "claude":
         m = {"claude pro": ("Claude Pro", "$20/mo"), "claude max": ("Claude Max", "$100/mo")}
         return m.get(p.lower(), (p or None, None))
-    if provider == "antigravity":
-        tid = item.get("tier_id")
-        override = (item.get("tier_override") or "").lower()
-        if override:
-            if "ultra" in override and "20" in override:
-                return ("Google AI Ultra 20x", None)
-            if "ultra" in override or "5x" in override:
-                return ("Google AI Ultra 5x", None)
-            if "pro" in override:
-                return ("Google AI Pro", None)
-            if "plus" in override:
-                return ("Google AI Plus", None)
-        m = {"g1-plus-tier": ("Google AI Plus", None),
-             "g1-pro-tier": ("Google AI Pro", "$19.99/mo"),
-             "g1-ultra-tier": ("Google AI Ultra", None),
-             "g1-ultra-5x-tier": ("Google AI Ultra 5x", None),
-             "g1-ultra-20x-tier": ("Google AI Ultra 20x", None),
-             "free-tier": ("Free", "$0"),
-             "standard-tier": ("Antigravity", None)}
-        return m.get(tid, (p or None, None))
     return (p or None, None)
 
 

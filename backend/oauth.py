@@ -4,7 +4,7 @@ Each provider function returns a dict with:
   access_token, refresh_token, id_token, expires_at (epoch s), account_id, email, plan, raw
 """
 from __future__ import annotations
-import base64, hashlib, json, os, secrets, socket, subprocess, threading, time, urllib.parse, urllib.request, urllib.error, http.server, socketserver, sys
+import base64, hashlib, json, secrets, socket, subprocess, threading, time, urllib.parse, urllib.request, urllib.error, http.server, socketserver, sys
 from typing import Any
 
 UA = "agent-pool/1.0"
@@ -379,141 +379,15 @@ def refresh_claude(refresh_token: str) -> dict:
     }
 
 
-# ─── Antigravity (Google OAuth) ────────────────────────────────────────────
-# Google OAuth credentials are loaded from a gitignored file
-# (secrets/antigravity.env) so they are never committed. Env vars override
-# the file if set.
-def _load_antigravity_creds():
-    env_id = os.environ.get("ANTIGRAVITY_CLIENT_ID", "")
-    env_secret = os.environ.get("ANTIGRAVITY_CLIENT_SECRET", "")
-    if env_id and env_secret:
-        return env_id, env_secret
-    # Look for antigravity.env in the user data dir (~/solo/token-status-bar/secrets/)
-    # so it is never bundled inside the read-only .app.
-    data_dir = os.environ.get("AGENT_POOL_DATA_DIR",
-                              str(os.path.expanduser("~/solo/token-status-bar/secrets")))
-    env_path = os.path.join(data_dir, "antigravity.env")
-    file_id, file_secret = "", ""
-    try:
-        # Best-effort tighten: this file holds OAuth client credentials.
-        try:
-            os.chmod(env_path, 0o600)
-        except OSError:
-            pass
-        with open(env_path) as f:
-            for line in f:
-                line = line.strip()
-                if line.startswith("ANTIGRAVITY_CLIENT_ID="):
-                    file_id = line.split("=", 1)[1]
-                elif line.startswith("ANTIGRAVITY_CLIENT_SECRET="):
-                    file_secret = line.split("=", 1)[1]
-    except FileNotFoundError:
-        pass
-    return env_id or file_id, env_secret or file_secret
-
-_AG_CLIENT_ID, _AG_CLIENT_SECRET = _load_antigravity_creds()
-ANTIGRAVITY = {
-    "auth_url": "https://accounts.google.com/o/oauth2/v2/auth",
-    "token_url": "https://oauth2.googleapis.com/token",
-    "client_id": _AG_CLIENT_ID,
-    "client_secret": _AG_CLIENT_SECRET,
-    "scope": "https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/cclog https://www.googleapis.com/auth/experimentsandconfigs",
-    "port": 51121,
-}
-
-
-def _ensure_antigravity_creds():
-    if ANTIGRAVITY["client_id"] and ANTIGRAVITY["client_secret"]:
-        return
-    client_id, client_secret = _load_antigravity_creds()
-    ANTIGRAVITY["client_id"] = client_id
-    ANTIGRAVITY["client_secret"] = client_secret
-
-
-def login_antigravity(incognito: bool = False) -> dict:
-    _ensure_antigravity_creds()
-    if not ANTIGRAVITY["client_id"] or not ANTIGRAVITY["client_secret"]:
-        raise RuntimeError(
-            "Antigravity Google OAuth credentials missing. Put them in "
-            "secrets/antigravity.env (ANTIGRAVITY_CLIENT_ID, "
-            "ANTIGRAVITY_CLIENT_SECRET) or export them as env vars."
-        )
-    state = gen_state()
-    redirect = f"http://localhost:{ANTIGRAVITY['port']}/oauth-callback"
-    params = {
-        "client_id": ANTIGRAVITY["client_id"],
-        "response_type": "code",
-        "redirect_uri": redirect,
-        "scope": ANTIGRAVITY["scope"],
-        "state": state,
-        "access_type": "offline",
-        "prompt": "consent",
-    }
-    auth_url = f"{ANTIGRAVITY['auth_url']}?{urllib.parse.urlencode(params)}"
-    open_browser(auth_url, incognito)
-    print(f"Waiting for Antigravity callback on port {ANTIGRAVITY['port']}...")
-    result = wait_for_callback(ANTIGRAVITY["port"], host="localhost", path="/oauth-callback")
-    if result.get("error"):
-        raise RuntimeError(f"Antigravity OAuth error: {result.get('error_description', result['error'])}")
-    if result.get("state") != state:
-        raise RuntimeError("Antigravity OAuth state mismatch")
-    st, tok = http_post(ANTIGRAVITY["token_url"], {
-        "grant_type": "authorization_code",
-        "client_id": ANTIGRAVITY["client_id"],
-        "code": result["code"],
-        "redirect_uri": redirect,
-        "client_secret": ANTIGRAVITY["client_secret"],
-    })
-    if st != 200:
-        raise RuntimeError(f"Antigravity token exchange failed: {st} {tok}")
-    # Fetch user info
-    email = ""
-    st2, userinfo = http_get("https://www.googleapis.com/oauth2/v2/userinfo",
-                             {"Authorization": f"Bearer {tok['access_token']}"})[:2]
-    if isinstance(userinfo, dict):
-        email = userinfo.get("email", "")
-    return {
-        "access_token": tok["access_token"],
-        "refresh_token": tok.get("refresh_token"),
-        "id_token": tok.get("id_token", ""),
-        "expires_at": time.time() + tok.get("expires_in", 3600),
-        "account_id": "",
-        "email": email,
-        "plan": "",
-        "raw": tok,
-    }
-
-
-def refresh_antigravity(refresh_token: str) -> dict:
-    _ensure_antigravity_creds()
-    st, tok = http_post(ANTIGRAVITY["token_url"], {
-        "grant_type": "refresh_token",
-        "client_id": ANTIGRAVITY["client_id"],
-        "client_secret": ANTIGRAVITY["client_secret"],
-        "refresh_token": refresh_token,
-    })
-    if st != 200:
-        raise RuntimeError(f"Antigravity refresh failed: {st} {tok}")
-    return {
-        "access_token": tok["access_token"],
-        "refresh_token": tok.get("refresh_token", refresh_token),
-        "id_token": tok.get("id_token", ""),
-        "expires_at": time.time() + tok.get("expires_in", 3600),
-        "raw": tok,
-    }
-
-
 # ─── registry ──────────────────────────────────────────────────────────────
 LOGIN_FUNCS = {
     "codex": login_codex,
     "claude": login_claude,
-    "antigravity": login_antigravity,
 }
 
 REFRESH_FUNCS = {
     "codex": refresh_codex,
     "claude": refresh_claude,
-    "antigravity": refresh_antigravity,
 }
 
 PROVIDERS = list(LOGIN_FUNCS.keys())
@@ -637,56 +511,6 @@ def _exchange_claude(code: str, state: str, verifier: str) -> dict:
     }
 
 
-def _authorize_antigravity(state: str, challenge: str) -> str:
-    _ensure_antigravity_creds()
-    if not ANTIGRAVITY["client_id"] or not ANTIGRAVITY["client_secret"]:
-        raise RuntimeError(
-            "Antigravity Google OAuth credentials missing. Put them in "
-            "secrets/antigravity.env (ANTIGRAVITY_CLIENT_ID, "
-            "ANTIGRAVITY_CLIENT_SECRET) or export them as env vars."
-        )
-    redirect = f"http://localhost:{ANTIGRAVITY['port']}/oauth-callback"
-    params = {
-        "client_id": ANTIGRAVITY["client_id"],
-        "response_type": "code",
-        "redirect_uri": redirect,
-        "scope": ANTIGRAVITY["scope"],
-        "state": state,
-        "access_type": "offline",
-        "prompt": "consent",
-    }
-    return f"{ANTIGRAVITY['auth_url']}?{urllib.parse.urlencode(params)}"
-
-
-def _exchange_antigravity(code: str, state: str, verifier: str) -> dict:
-    _ensure_antigravity_creds()
-    redirect = f"http://localhost:{ANTIGRAVITY['port']}/oauth-callback"
-    st, tok = http_post(ANTIGRAVITY["token_url"], {
-        "grant_type": "authorization_code",
-        "client_id": ANTIGRAVITY["client_id"],
-        "code": code,
-        "redirect_uri": redirect,
-        "client_secret": ANTIGRAVITY["client_secret"],
-    })
-    if st != 200:
-        raise RuntimeError(f"Antigravity token exchange failed: {st} {tok}")
-    email = ""
-    userinfo = http_get("https://www.googleapis.com/oauth2/v2/userinfo",
-                        {"Authorization": f"Bearer {tok['access_token']}"})[1]
-    if isinstance(userinfo, dict):
-        email = userinfo.get("email", "")
-    return {
-        "access_token": tok["access_token"],
-        "refresh_token": tok.get("refresh_token"),
-        "id_token": tok.get("id_token", ""),
-        "expires_at": time.time() + tok.get("expires_in", 3600),
-        "account_id": "",
-        "email": email,
-        "plan": "",
-        "raw": tok,
-    }
-
-
 # Each spec: which loopback (host/port/path) to advertise, whether the flow uses
 # PKCE, and the authorize-URL + token-exchange callables above.
 BROWSER_FLOWS: dict[str, dict] = {
@@ -694,8 +518,6 @@ BROWSER_FLOWS: dict[str, dict] = {
               "pkce": True, "authorize": _authorize_codex, "exchange": _exchange_codex},
     "claude": {"host": "localhost", "port": CLAUDE["port"], "path": "/callback",
                "pkce": True, "authorize": _authorize_claude, "exchange": _exchange_claude},
-    "antigravity": {"host": "localhost", "port": ANTIGRAVITY["port"], "path": "/oauth-callback",
-                    "pkce": False, "authorize": _authorize_antigravity, "exchange": _exchange_antigravity},
 }
 
 

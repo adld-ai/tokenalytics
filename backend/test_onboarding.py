@@ -24,7 +24,7 @@ os.environ["AGENT_POOL_STATUS_JSON"] = str(Path(_TMP) / "status.json")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import providers, store, oauth, poller, pool, status  # noqa: E402
-from providers import copilot, devin, util, xai  # noqa: E402
+from providers import antigravity, copilot, devin, util, xai  # noqa: E402
 
 
 def _iso(ts):
@@ -228,8 +228,12 @@ class OnboardingPollTests(unittest.TestCase):
 
     # Helper: run onboarding for a provider and return the saved snapshot.
     def _onboard(self, provider):
-        if provider in ("copilot", "xai"):
-            adapter = copilot if provider == "copilot" else xai
+        if provider in ("antigravity", "copilot", "xai"):
+            adapter = {
+                "antigravity": antigravity,
+                "copilot": copilot,
+                "xai": xai,
+            }[provider]
             login_patch = mock.patch.object(
                 adapter, "LOGIN", side_effect=lambda incognito=False: _fake_login(provider))
         else:
@@ -335,12 +339,19 @@ class OnboardingPollTests(unittest.TestCase):
 
     def test_antigravity_subscription_data(self):
         _, snap = self._onboard("antigravity")
-        for f in ("plan", "primary_used_pct", "primary_window_s",
-                  "rate_limit_remaining", "rate_limit_limit"):
-            self.assertIsNotNone(snap[f], f"antigravity snapshot missing {f}")
         self.assertEqual(snap["plan"], "Antigravity")
         rj = json.loads(snap["raw_json"])
+        windows = rj["windows"]
+        self.assertEqual(len(windows), 1)
+        self.assertEqual(windows[0]["kind"], "model_weekly")
+        self.assertEqual(windows[0]["label"], "Gemini 3 Pro")
+        self.assertEqual(windows[0]["used_pct"], 25.0)
+        self.assertIsNotNone(windows[0]["reset_at"])
         self.assertEqual(rj["extra"]["tier_id"], "standard-tier")
+        exported = antigravity.EXTRA(snap)
+        self.assertEqual(exported["rate_limit_remaining"],
+                         "75% left (Gemini 3 Pro)")
+        self.assertEqual(exported["rate_limit_limit"], "Antigravity")
 
     def test_antigravity_plan_labels(self):
         cases = [
@@ -354,7 +365,7 @@ class OnboardingPollTests(unittest.TestCase):
         ]
         for item, expected in cases:
             with self.subTest(item=item):
-                name, _ = status.plan_label("antigravity", "Antigravity", item)
+                name, _ = antigravity.PLAN_LABEL("Antigravity", item)
                 self.assertEqual(name, expected)
 
     def test_copilot_subscription_data(self):

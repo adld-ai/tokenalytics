@@ -268,10 +268,6 @@ def cmd_refresh(account_id):
                     and tok["expires_at"] > time.time()):
                 print(f"✓ Token already refreshed by another process for {provider} / {a['email']}")
                 return 0
-            if provider == "antigravity":
-                client_id, client_secret = oauth._load_antigravity_creds()
-                oauth.ANTIGRAVITY["client_id"] = client_id
-                oauth.ANTIGRAVITY["client_secret"] = client_secret
             result = refresh(tok["refresh_token"])
             store.save_token(DB, aid, result["access_token"],
                              result.get("refresh_token"), result.get("id_token"),

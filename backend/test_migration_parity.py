@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import status  # noqa: E402
 import window_history  # noqa: E402
-from providers import copilot, devin, xai  # noqa: E402
+from providers import antigravity, copilot, devin, xai  # noqa: E402
 
 
 GOLDEN_DIR = os.path.join(os.path.dirname(__file__), "fixtures", "golden")
@@ -221,6 +221,28 @@ class AntigravityParityTest(ParityCase):
              "reset_at": 4000.0},
         ]}}),
     )
+
+    def adapter_snapshot(self):
+        return antigravity.to_snapshot({
+            "code_assist": {
+                "allowedTiers": [{
+                    "id": "standard-tier",
+                    "name": "Antigravity",
+                }],
+            },
+            "models": {
+                "gemini-3-pro": {
+                    "displayName": "Gemini 3 Pro",
+                    "quotaInfo": {"remainingFraction": 1.0},
+                },
+            },
+            "usage_windows": [
+                {"group": "gemini", "window": "5h",
+                 "remaining_pct": 100.0, "reset_at": None},
+                {"group": "gemini", "window": "weekly",
+                 "remaining_pct": 92.0, "reset_at": 4000.0},
+            ],
+        })
 
 
 if __name__ == "__main__":
