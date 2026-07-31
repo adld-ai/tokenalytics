@@ -44,6 +44,13 @@ for f in "$DIR/backend/"*.py; do
   [[ "$(basename "$f")" == test_* ]] && continue
   cp "$f" "$APP_DIR/Contents/Resources/backend/"
 done
+# Provider adapter package. poller.py imports it unconditionally, so a
+# missing directory here breaks every poll in the shipped app.
+mkdir -p "$APP_DIR/Contents/Resources/backend/providers"
+for f in "$DIR/backend/providers/"*.py; do
+  [[ "$(basename "$f")" == test_* ]] && continue
+  cp "$f" "$APP_DIR/Contents/Resources/backend/providers/"
+done
 # Bundle the browser accounts panel served by `pool.py server`.
 cp "$DIR/backend/panel.html" "$APP_DIR/Contents/Resources/backend/"
 
