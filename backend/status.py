@@ -431,6 +431,59 @@ def _snap_raw(snap) -> dict:
     return rj if isinstance(rj, dict) else {}
 
 
+DECLARED_DEFAULT_KIND = "session"
+
+
+def _reset_epoch(v):
+    """Epoch seconds from a declared reset field (epoch number or ISO string)."""
+    if v is None:
+        return None
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    dt = _parse_iso(v)
+    return dt.timestamp() if dt else None
+
+
+def _declared_used_pct(w):
+    """used_pct of a declared window; APIs that report headroom send
+    remaining_pct instead, which is inverted and clamped here."""
+    used = _pct(w.get("used_pct"))
+    if used is not None:
+        return used
+    rem = _pct(w.get("remaining_pct"))
+    if rem is None:
+        return None
+    return max(0.0, min(100.0, 100.0 - rem))
+
+
+def declared_windows(rj, src, as_of) -> list[dict] | None:
+    """Windows an adapter normalized itself, or None when it declared none.
+
+    Declarative providers put already-shaped windows in raw_json["windows"],
+    so adding one needs neither a limit_snapshots column nor a branch below.
+    An empty list still returns [] rather than None: the adapter spoke, and
+    the legacy column path must not answer over it.
+    """
+    declared = rj.get("windows")
+    if not isinstance(declared, list):
+        return None
+    out = []
+    for w in declared:
+        if not isinstance(w, dict):
+            continue
+        kind = w.get("kind") or _kind_from_window_s(w.get("window_s"),
+                                                    DECLARED_DEFAULT_KIND)
+        reset = w["reset_at_epoch"] if "reset_at_epoch" in w else w.get("reset_at")
+        win = _win(kind, w.get("label"), _declared_used_pct(w), _reset_epoch(reset),
+                   severity=w.get("severity"), is_active=w.get("is_active"),
+                   source=w.get("source") or src, as_of=as_of)
+        if win:
+            out.append(win)
+    return out
+
+
 def normalize_windows(provider, snap) -> list[dict]:
     """Reduce one snapshot to the unified windows[] model (pure function)."""
     if not snap or snap.get("status") not in ("active", "rate_limited"):
@@ -438,6 +491,9 @@ def normalize_windows(provider, snap) -> list[dict]:
     as_of = float(snap["ts"]) if snap.get("ts") else None
     src = snap.get("source") or "api"
     rj = _snap_raw(snap)
+    declared = declared_windows(rj, src, as_of)
+    if declared is not None:
+        return declared
     out = []
 
     def add(w):
