@@ -1,0 +1,25 @@
+{
+  "history_keys": [
+    "monthly"
+  ],
+  "windows": [
+    {
+      "is_active": null,
+      "kind": "monthly",
+      "label": "credits",
+      "reset_at_epoch": 1785542400.0,
+      "severity": "normal",
+      "source": "api",
+      "used_pct": 3.17
+    },
+    {
+      "is_active": null,
+      "kind": "daily",
+      "label": null,
+      "reset_at_epoch": null,
+      "severity": "normal",
+      "source": "api",
+      "used_pct": 0.0
+    }
+  ]
+}

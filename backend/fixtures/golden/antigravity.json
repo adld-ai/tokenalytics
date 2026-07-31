@@ -1,0 +1,34 @@
+{
+  "history_keys": [
+    "weekly_gemini"
+  ],
+  "windows": [
+    {
+      "is_active": null,
+      "kind": "model_weekly",
+      "label": "Gemini 3 Pro",
+      "reset_at_epoch": null,
+      "severity": "normal",
+      "source": "api",
+      "used_pct": 0.0
+    },
+    {
+      "is_active": null,
+      "kind": "5h",
+      "label": "gemini",
+      "reset_at_epoch": null,
+      "severity": "normal",
+      "source": "api",
+      "used_pct": 0.0
+    },
+    {
+      "is_active": null,
+      "kind": "weekly",
+      "label": "gemini",
+      "reset_at_epoch": 4000.0,
+      "severity": "normal",
+      "source": "api",
+      "used_pct": 8.0
+    }
+  ]
+}

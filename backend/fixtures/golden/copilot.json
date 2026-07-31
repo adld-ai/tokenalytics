@@ -1,0 +1,16 @@
+{
+  "history_keys": [
+    "monthly_premium"
+  ],
+  "windows": [
+    {
+      "is_active": null,
+      "kind": "monthly",
+      "label": "premium",
+      "reset_at_epoch": 2000.0,
+      "severity": "normal",
+      "source": "api",
+      "used_pct": 12.1
+    }
+  ]
+}
