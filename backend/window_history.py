@@ -7,7 +7,7 @@ them. Error snapshots never participate, so a connection failure can never
 fake or corrupt a reset.
 """
 from __future__ import annotations
-import csv, datetime, io, json, os, time, zoneinfo
+import csv, datetime, io, json, os, re, time, zoneinfo
 from dataclasses import dataclass, field
 from pathlib import Path
 import store
@@ -137,6 +137,55 @@ def _agy_usage_windows(snap) -> list[dict]:
     return out
 
 
+# Nominal duration of a declared window whose adapter did not state one.
+# monthly is deliberately absent: its length varies, so it stays None.
+WINDOW_S_BY_KIND = {"5h": 18000, "session": 18000, "daily": 86400,
+                    "weekly": 604800, "model_weekly": 604800}
+
+
+def declared(snap) -> list[dict] | None:
+    """raw_json["windows"] entries an adapter normalized itself, or None.
+
+    Adapters that fill this own the snapshot's windows outright, which is what
+    lets a new provider ship without a limit_snapshots column or a branch here.
+    """
+    try:
+        rj = json.loads(snap.get("raw_json") or "{}")
+    except Exception:
+        return None
+    ws = rj.get("windows") if isinstance(rj, dict) else None
+    return ws if isinstance(ws, list) else None
+
+
+def _declared_base_kind(w) -> str:
+    return w.get("kind") or _kind_from_window_s(w.get("window_s"), "session")
+
+
+def _declared_kind(w) -> str:
+    """Stable history key: the kind, suffixed with a slugged label when set so
+    two windows of the same kind (per-model quotas) never share a row."""
+    base = _declared_base_kind(w)
+    slug = re.sub(r"[^a-z0-9]+", "_", str(w.get("label") or "").lower()).strip("_")
+    return f"{base}_{slug}" if slug else base
+
+
+def _declared_used(w) -> float | None:
+    used = _pct(w.get("used_pct"))
+    if used is not None:
+        return used
+    rem = _pct(w.get("remaining_pct"))
+    return None if rem is None else max(0.0, min(100.0, 100.0 - rem))
+
+
+def _declared_reset(w) -> float | None:
+    v = w["reset_at_epoch"] if "reset_at_epoch" in w else w.get("reset_at")
+    if v is None or isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    return _parse_iso_ts(v)
+
+
 def timed_windows(provider, snap) -> list[dict]:
     """Snapshot windows that carry a reset timestamp (detection rule 2)."""
     out: list[dict] = []
@@ -150,6 +199,18 @@ def timed_windows(provider, snap) -> list[dict]:
             return  # a malformed reading skips its window, never aborts the sweep
         out.append({"kind": kind, "used_pct": used_pct, "reset_at": reset_ts,
                     "window_s": window_s, "start": start})
+
+    dec = declared(snap)
+    if dec is not None:
+        for w in dec:
+            if not isinstance(w, dict):
+                continue
+            reset = _declared_reset(w)
+            if reset is None:
+                continue
+            add(_declared_kind(w), _declared_used(w), reset,
+                w.get("window_s") or WINDOW_S_BY_KIND.get(_declared_base_kind(w)))
+        return out
 
     if provider in ("codex", "claude", "antigravity"):
         add(_kind_from_window_s(snap.get("primary_window_s"), "5h"),
@@ -180,6 +241,17 @@ def drop_windows(provider, snap) -> list[dict]:
     boundary is a unix ts hint or "midnight" for devin's daily window.
     """
     out: list[dict] = []
+    dec = declared(snap)
+    if dec is not None:
+        for w in dec:
+            if not isinstance(w, dict) or _declared_reset(w) is not None:
+                continue
+            used = _declared_used(w)
+            if used is not None:
+                out.append({"kind": _declared_kind(w), "used_pct": used,
+                            "boundary": w.get("boundary")})
+        return out
+
     if provider == "copilot":
         used = _pct(snap.get("secondary_used_pct"))
         if used is not None:

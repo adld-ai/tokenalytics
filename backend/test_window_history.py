@@ -426,8 +426,10 @@ class DashboardTests(unittest.TestCase):
         html = path.read_text()
         self.assertIn("const BANKED =", html)
         self.assertIn("const RESET_POSTS =", html)
-        self.assertIn("2026-07-21 16:47:15", html)
-        self.assertIn("2079609157934886975", html)
+        self.assertIn("2026-07-12 17:59:57", html)
+        self.assertIn("2076365965915467978", html)
+        self.assertIn("2026-07-25 19:17:12", html)
+        self.assertIn("2081096447718723984", html)
         self.assertNotIn("__ARCHIVE_AS_OF__", html)
         self.assertNotIn("__POLICY_URL__", html)
 
