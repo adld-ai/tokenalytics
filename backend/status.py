@@ -2,7 +2,7 @@
 from __future__ import annotations
 import calendar, json, os, re, sys, time, datetime, zoneinfo
 from pathlib import Path
-import store
+import providers, store
 
 STATUS_JSON = Path(os.environ.get("AGENT_POOL_STATUS_JSON",
                                     str(Path.home() / "solo/token-status-bar" / "secrets" / "status.json")))
@@ -324,6 +324,9 @@ def claude_extra(snap) -> dict:
 
 def provider_extra(provider, snap) -> dict:
     """Extra subscription fields parsed from a snapshot's raw_json['extra']."""
+    hook = providers.hook(provider, "EXTRA")
+    if hook:
+        return hook(snap) or {}
     if not snap or not snap.get("raw_json"):
         return {}
     try:
@@ -376,10 +379,6 @@ def provider_extra(provider, snap) -> dict:
             start_dt = previous_month(reset_date)
             if start_dt:
                 out["plan_start"] = start_dt.strftime("%Y-%m-%d")
-    elif provider == "devin":
-        out["credit_balance"] = extra.get("credit_balance")
-        out["plan_start"] = ts_fmt(extra.get("plan_start_unix")) if extra.get("plan_start_unix") else None
-        out["plan_reset"] = ts_fmt(extra.get("plan_reset_unix")) if extra.get("plan_reset_unix") else None
     return {k: v for k, v in out.items() if v is not None}
 
 
@@ -722,6 +721,9 @@ def codex_extra(conn, account_id) -> dict:
 
 def plan_label(provider, plan, item) -> tuple:
     """Return (display_name, price_or_None) for a provider's plan."""
+    hook = providers.hook(provider, "PLAN_LABEL")
+    if hook:
+        return hook(plan, item)
     p = (plan or "").strip()
     if provider == "codex":
         m = {"plus": ("Plus", "$20/mo"), "pro": ("Pro", "$200/mo"),
@@ -762,9 +764,6 @@ def plan_label(provider, plan, item) -> tuple:
         return m.get(tid, (p or None, None))
     if provider == "xai":
         return (p or None, None)
-    if provider == "devin":
-        m = {"core": ("Core", "$20/mo"), "team": ("Team", "$500/mo")}
-        return m.get(p.lower(), (p or None, None))
     return (p or None, None)
 
 

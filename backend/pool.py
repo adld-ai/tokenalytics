@@ -131,7 +131,10 @@ def cmd_add_devin(api_key, label=None):
     label = label or "devin #1"
     print(f"\n=== Onboarding {label} (devin) ===")
     try:
-        result = oauth.login_devin(api_key)
+        login = oauth.resolve_login("devin")
+        if login is None:
+            raise RuntimeError("no Devin login adapter")
+        result = login(api_key)
     except Exception as e:
         print(f"Devin key validation failed: {e}")
         store.log_event(DB, None, "onboard", False, str(e))
@@ -167,7 +170,10 @@ def cmd_reconnect(account_id, api_key=None, incognito=False):
             if not api_key:
                 print("usage: pool.py reconnect <account_id> [api_key] (or pipe the key via stdin)")
                 return 1
-            result = oauth.login_devin(api_key)
+            login = oauth.resolve_login(provider)
+            if login is None:
+                raise RuntimeError("no Devin login adapter")
+            result = login(api_key)
         else:
             login = oauth.resolve_login(provider)
             if login is None:

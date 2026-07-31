@@ -683,31 +683,6 @@ def refresh_copilot(github_token: str) -> dict:
     }
 
 
-# ─── Devin (API key — no OAuth) ────────────────────────────────────────────
-def login_devin(api_key: str) -> dict:
-    """Devin uses API keys, not OAuth. Get key from app.devin.ai dashboard."""
-    # Validate the key by fetching org info
-    st, resp = http_get("https://api.devin.ai/v1/user",
-                        {"Authorization": f"Bearer {api_key}", "User-Agent": UA})[:2]
-    if st != 200:
-        raise RuntimeError(f"Devin API key validation failed: HTTP {st}: {str(resp)[:120]}")
-    email = ""
-    org_id = ""
-    if isinstance(resp, dict):
-        email = resp.get("email", "")
-        org_id = str(resp.get("organization_id", resp.get("org_id", "")))
-    return {
-        "access_token": api_key,
-        "refresh_token": None,
-        "id_token": "",
-        "expires_at": 0,  # API keys don't expire
-        "account_id": org_id,
-        "email": email or "devin-user",
-        "plan": "",
-        "raw": {"api_key": api_key, "user_info": resp if isinstance(resp, dict) else {}},
-    }
-
-
 # ─── registry ──────────────────────────────────────────────────────────────
 LOGIN_FUNCS = {
     "codex": login_codex,
@@ -725,7 +700,7 @@ REFRESH_FUNCS = {
     "copilot": refresh_copilot,
 }
 
-PROVIDERS = list(LOGIN_FUNCS.keys()) + ["devin"]
+PROVIDERS = list(LOGIN_FUNCS.keys())
 
 
 def resolve_login(provider):

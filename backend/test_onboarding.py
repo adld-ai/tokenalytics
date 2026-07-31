@@ -23,7 +23,8 @@ os.environ["AGENT_POOL_DB"] = str(Path(_TMP) / "pool.db")
 os.environ["AGENT_POOL_STATUS_JSON"] = str(Path(_TMP) / "status.json")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import store, oauth, poller, pool, status  # noqa: E402
+import providers, store, oauth, poller, pool, status  # noqa: E402
+from providers import devin, util  # noqa: E402
 
 
 def _iso(ts):
@@ -237,6 +238,7 @@ class OnboardingPollTests(unittest.TestCase):
     def test_every_oauth_provider_onboarding_polls(self):
         """cmd_add must call poller.poll_account for every OAuth provider."""
         providers_with_login = [provider for provider in oauth.known_providers()
+                                if providers.auth_kind(provider) in (None, util.AUTH_OAUTH)
                                 if oauth.resolve_login(provider) is not None]
         for provider in providers_with_login:
             with self.subTest(provider=provider):
@@ -247,7 +249,7 @@ class OnboardingPollTests(unittest.TestCase):
 
     def test_devin_onboarding_polls(self):
         """cmd_add_devin must call poller.poll_account for devin."""
-        with mock.patch.object(oauth, "login_devin", return_value={
+        with mock.patch.object(devin, "LOGIN", return_value={
             "access_token": "fake-devin-key", "refresh_token": None, "id_token": "",
             "expires_at": 0, "account_id": "devin-org-1",
             "email": "devin@example.com", "plan": "", "raw": {"api_key": "fake-devin-key"},
@@ -343,7 +345,7 @@ class OnboardingPollTests(unittest.TestCase):
         self.assertEqual(rj["extra"]["github_email"], "test@example.com")
 
     def test_devin_subscription_data(self):
-        with mock.patch.object(oauth, "login_devin", return_value={
+        with mock.patch.object(devin, "LOGIN", return_value={
             "access_token": "fake-devin-key", "refresh_token": None, "id_token": "",
             "expires_at": 0, "account_id": "devin-org-1",
             "email": "devin@example.com", "plan": "", "raw": {"api_key": "fake-devin-key"},
@@ -352,18 +354,25 @@ class OnboardingPollTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         acct = next(a for a in store.list_accounts(self.conn) if a["provider"] == "devin")
         snap = store.latest_snapshot(self.conn, acct["id"])
-        for f in ("plan", "primary_used_pct", "primary_window_s",
-                  "secondary_used_pct", "secondary_window_s",
-                  "rate_limit_remaining", "rate_limit_limit"):
-            self.assertIsNotNone(snap[f], f"devin snapshot missing {f}")
+        self.assertIsNotNone(snap["plan"], "devin snapshot missing plan")
         rj = json.loads(snap["raw_json"])
+        windows = {window["kind"]: window for window in rj["windows"]}
+        self.assertEqual(windows["daily"]["remaining_pct"], 70)
+        self.assertEqual(windows["daily"]["window_s"], 86400)
+        self.assertIsNotNone(windows["daily"].get("reset_at"))
+        self.assertEqual(windows["daily"]["boundary"], "midnight")
+        self.assertEqual(windows["weekly"]["remaining_pct"], 40)
+        self.assertEqual(windows["weekly"]["window_s"], 604800)
+        self.assertIsNotNone(windows["weekly"].get("reset_at"))
+        self.assertEqual(windows["weekly"]["boundary"],
+                         rj["extra"]["plan_reset_unix"])
         self.assertEqual(rj["extra"]["credit_balance"], 5.0)
         self.assertIsNotNone(rj["extra"].get("plan_start_unix"))
         self.assertIsNotNone(rj["extra"].get("plan_reset_unix"))
 
     def test_export_includes_billing_period_fields(self):
         self._onboard("xai")
-        with mock.patch.object(oauth, "login_devin", return_value={
+        with mock.patch.object(devin, "LOGIN", return_value={
             "access_token": "fake-devin-key", "refresh_token": None, "id_token": "",
             "expires_at": 0, "account_id": "devin-org-1",
             "email": "devin@example.com", "plan": "", "raw": {"api_key": "fake-devin-key"},
@@ -377,9 +386,9 @@ class OnboardingPollTests(unittest.TestCase):
         self.assertEqual(xai["monthly_period_end"], "2026-02-01 09:00")
         self.assertEqual(xai["plan_start"], "2026-01-01 09:00")
         self.assertEqual(xai["plan_reset"], "2026-02-01 09:00")
-        devin = by_provider["devin"]
-        self.assertIsNotNone(devin["plan_start"])
-        self.assertIsNotNone(devin["plan_reset"])
+        devin_item = by_provider["devin"]
+        self.assertIsNotNone(devin_item["plan_start"])
+        self.assertIsNotNone(devin_item["plan_reset"])
 
     def test_export_includes_codex_subscription_meta(self):
         acct, _ = self._onboard("codex")

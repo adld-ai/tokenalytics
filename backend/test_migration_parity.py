@@ -24,6 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import status  # noqa: E402
 import window_history  # noqa: E402
+from providers import devin  # noqa: E402
 
 
 GOLDEN_DIR = os.path.join(os.path.dirname(__file__), "fixtures", "golden")
@@ -168,6 +169,20 @@ class DevinParityTest(ParityCase):
         primary_reset_at=2000.0,
         secondary_reset_at=3000.0,
     )
+
+    def adapter_snapshot(self):
+        def field(field_num, value):
+            return (devin._devin_encode_varint(field_num << 3)
+                    + devin._devin_encode_varint(value))
+
+        def message(field_num, value):
+            return (devin._devin_encode_varint((field_num << 3) | 2)
+                    + devin._devin_encode_varint(len(value)) + value)
+
+        quota = (field(14, 90) + field(15, 80)
+                 + field(17, 2000) + field(18, 3000))
+        user_status = message(13, quota)
+        return devin.to_snapshot(message(1, user_status))
 
 
 class AntigravityParityTest(ParityCase):
