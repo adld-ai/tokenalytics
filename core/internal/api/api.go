@@ -5,6 +5,7 @@
 package api
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -13,16 +14,25 @@ import (
 	"strings"
 	"time"
 
+	"tokenbar/internal/harvest"
 	"tokenbar/internal/pool"
 	"tokenbar/internal/routing"
 )
 
+// FlowRunner executes a provider login flow (M2); injectable so tests
+// never touch real OAuth endpoints.
+type FlowRunner interface {
+	Run(ctx context.Context, provider string) (pool.Account, pool.TokenSet, error)
+}
+
 // Server wires the pool and router to HTTP.
 type Server struct {
-	Pool   *pool.Pool
-	Router *routing.Router
-	Token  string
-	Mux    *http.ServeMux
+	Pool       *pool.Pool
+	Router     *routing.Router
+	Token      string
+	Mux        *http.ServeMux
+	Engine     *harvest.Engine // optional: quota display (M2)
+	FlowRunner FlowRunner      // optional: OAuth/device login (M2)
 }
 
 func New(p *pool.Pool, r *routing.Router, token string) *Server {
@@ -79,11 +89,21 @@ type CooldownPayload struct {
 }
 
 type StatePayload struct {
-	SchemaVersion int                     `json:"schema_version"`
-	GeneratedAt   string                  `json:"generated_at"`
-	Accounts      []AccountPayload        `json:"accounts"`
-	Routing       map[string]RoutePayload `json:"routing"`
-	Cooldowns     []CooldownPayload       `json:"cooldowns,omitempty"`
+	SchemaVersion int                       `json:"schema_version"`
+	GeneratedAt   string                    `json:"generated_at"`
+	Accounts      []AccountPayload          `json:"accounts"`
+	Routing       map[string]RoutePayload   `json:"routing"`
+	Cooldowns     []CooldownPayload         `json:"cooldowns,omitempty"`
+	Windows       map[int64][]WindowPayload `json:"windows,omitempty"`
+}
+
+// WindowPayload is one quota window for display (advisory only, S4).
+type WindowPayload struct {
+	Kind    string   `json:"kind"`
+	Label   string   `json:"label,omitempty"`
+	UsedPct *float64 `json:"used_pct,omitempty"`
+	ResetAt *float64 `json:"reset_at,omitempty"`
+	WindowS int64    `json:"window_s,omitempty"`
 }
 
 type HealthPayload struct {
@@ -106,12 +126,17 @@ type addAccountRequest struct {
 	RefreshToken string  `json:"refresh_token"`
 	IDToken      string  `json:"id_token"`
 	ExpiresAt    float64 `json:"expires_at"`
+	Flow         string  `json:"flow"` // "": direct import | "oauth" | "device" (M2)
 }
 
 func (s *Server) addAccount(w http.ResponseWriter, r *http.Request) {
 	var req addAccountRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"error":"bad json"}`, http.StatusBadRequest)
+		return
+	}
+	if req.Flow != "" {
+		s.addAccountViaFlow(w, r, req.Provider)
 		return
 	}
 	if req.Provider == "" || (req.AccountID == "" && req.Email == "") {
@@ -131,6 +156,36 @@ func (s *Server) addAccount(w http.ResponseWriter, r *http.Request) {
 	}
 	s.RebuildRoutes()
 	writeJSON(w, http.StatusCreated, AccountPayload{ID: id, Provider: req.Provider, Email: req.Email})
+}
+
+// addAccountViaFlow runs a provider login flow (OAuth browser /
+// device) synchronously behind POST /api/v1/accounts (M2). Human-paced
+// by construction: one flow at a time per server (S26).
+func (s *Server) addAccountViaFlow(w http.ResponseWriter, r *http.Request, provider string) {
+	if s.FlowRunner == nil {
+		http.Error(w, `{"error":"flows unavailable"}`, http.StatusNotImplemented)
+		return
+	}
+	if provider == "" {
+		http.Error(w, `{"error":"provider required"}`, http.StatusBadRequest)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 6*time.Minute)
+	defer cancel()
+	acct, ts, err := s.FlowRunner.Run(ctx, provider)
+	if err != nil {
+		http.Error(w, `{"error":`+strconv.Quote(err.Error())+`}`, http.StatusBadGateway)
+		return
+	}
+	id, err := s.Pool.Add(acct, ts)
+	if err != nil {
+		http.Error(w, `{"error":`+strconv.Quote(err.Error())+`}`, http.StatusConflict)
+		return
+	}
+	s.RebuildRoutes()
+	writeJSON(w, http.StatusCreated, AccountPayload{
+		ID: id, Provider: acct.Provider, Email: acct.Email, AccountID: acct.AccountID,
+	})
 }
 
 func (s *Server) removeAccount(w http.ResponseWriter, r *http.Request) {
@@ -220,6 +275,20 @@ func (s *Server) state(w http.ResponseWriter, _ *http.Request) {
 			ID: a.ID, Provider: a.Provider, Email: a.Email, Label: a.Label,
 			Plan: a.Plan, AccountID: a.AccountID, Disabled: a.Disabled,
 		})
+		if s.Engine != nil {
+			ws, err := s.Engine.LatestWindows(a.ID)
+			if err == nil && len(ws) > 0 {
+				if payload.Windows == nil {
+					payload.Windows = map[int64][]WindowPayload{}
+				}
+				for _, qw := range ws {
+					payload.Windows[a.ID] = append(payload.Windows[a.ID], WindowPayload{
+						Kind: qw.Kind, Label: qw.Label,
+						UsedPct: qw.UsedPct, ResetAt: qw.ResetAt, WindowS: qw.WindowS,
+					})
+				}
+			}
+		}
 	}
 	for provider, ri := range s.Router.Routes() {
 		payload.Routing[provider] = RoutePayload{

@@ -180,10 +180,12 @@ func (p *Pool) SetDisabled(id int64, disabled bool) error {
 	})
 }
 
-// Tokens resolves an account's credentials through the vault.
+// Tokens resolves an account's credentials through the vault. Rows
+// sealed into an external vault hold no plaintext columns; the vault
+// is the only read path (S16).
 func (p *Pool) Tokens(id int64) (TokenSet, error) {
 	rows, err := p.st.Query(
-		"SELECT access_token, refresh_token, id_token, expires_at, last_refresh, raw_json FROM tokens WHERE account_id = ?", id)
+		"SELECT vault_ref, access_token, refresh_token, id_token, expires_at, last_refresh, raw_json FROM tokens WHERE account_id = ?", id)
 	if err != nil {
 		return TokenSet{}, err
 	}
@@ -191,15 +193,91 @@ func (p *Pool) Tokens(id int64) (TokenSet, error) {
 	if !rows.Next() {
 		return TokenSet{}, ErrNotFound
 	}
-	var ts TokenSet
+	var ref string
 	var at, rt, it, raw sql.NullString
 	var exp, lr sql.NullFloat64
-	if err := rows.Scan(&at, &rt, &it, &exp, &lr, &raw); err != nil {
+	if err := rows.Scan(&ref, &at, &rt, &it, &exp, &lr, &raw); err != nil {
 		return TokenSet{}, err
 	}
+	if ref != "db" {
+		ts, err := p.vault.Open(ref)
+		if err != nil {
+			return TokenSet{}, err
+		}
+		ts.ExpiresAt, ts.LastRefresh, ts.RawJSON = exp.Float64, lr.Float64, raw.String
+		return ts, nil
+	}
+	var ts TokenSet
 	ts.AccessToken, ts.RefreshToken, ts.IDToken = at.String, rt.String, it.String
 	ts.ExpiresAt, ts.LastRefresh, ts.RawJSON = exp.Float64, lr.Float64, raw.String
 	return ts, nil
+}
+
+// UpdateTokens re-seals an account's tokens (refresh-on-use writes
+// through here).
+func (p *Pool) UpdateTokens(id int64, ts TokenSet) error {
+	ref, err := p.vault.Seal(ts)
+	if err != nil {
+		return err
+	}
+	return p.st.Submit(func(tx *sql.Tx) error {
+		// After the keychain migration the plaintext columns stay
+		// cleared; before it (M1 plain vault) they carry the tokens.
+		at, rt, it := ts.AccessToken, ts.RefreshToken, ts.IDToken
+		if ref != "db" {
+			at, rt, it = "", "", ""
+		}
+		res, err := tx.Exec(
+			`UPDATE tokens SET vault_ref=?, access_token=?, refresh_token=?, id_token=?,
+			 expires_at=?, last_refresh=?, raw_json=? WHERE account_id=?`,
+			ref, at, rt, it, ts.ExpiresAt, ts.LastRefresh, ts.RawJSON, id)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return ErrNotFound
+		}
+		return nil
+	})
+}
+
+// MigrateToVault re-seals every plaintext token row into v and clears
+// the plaintext columns (S16). Returns the number of rows migrated.
+func (p *Pool) MigrateToVault(v Vault) (int, error) {
+	rows, err := p.st.Query(
+		"SELECT account_id, access_token, refresh_token, id_token, expires_at, last_refresh, raw_json FROM tokens WHERE vault_ref = 'db'")
+	if err != nil {
+		return 0, err
+	}
+	type row struct {
+		id int64
+		ts TokenSet
+	}
+	var pending []row
+	for rows.Next() {
+		var r row
+		var at, rt, it, raw sql.NullString
+		if err := rows.Scan(&r.id, &at, &rt, &it, &r.ts.ExpiresAt, &r.ts.LastRefresh, &raw); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		r.ts.AccessToken, r.ts.RefreshToken, r.ts.IDToken = at.String, rt.String, it.String
+		r.ts.RawJSON = raw.String
+		pending = append(pending, r)
+	}
+	rows.Close()
+
+	old := p.vault
+	p.vault = v
+	migrated := 0
+	for _, r := range pending {
+		if err := p.UpdateTokens(r.id, r.ts); err != nil {
+			p.vault = old
+			return migrated, fmt.Errorf("pool: migrate account %d: %w", r.id, err)
+		}
+		migrated++
+	}
+	return migrated, nil
 }
 
 func boolToInt(b bool) int {

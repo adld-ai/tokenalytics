@@ -42,7 +42,10 @@ type Routed struct {
 	StripPrefix string
 	Source      CredentialSource
 	MaxInFlight int
-	client      *http.Client
+	// Harvest taps (S4): read-only, off the critical path. Nil = off.
+	TapHeaders func(accountID int64, h http.Header)
+	TeeBody    func(accountID int64, r io.Reader) io.Reader
+	client     *http.Client
 }
 
 func NewRouted(upstream *url.URL, stripPrefix string, src CredentialSource) *Routed {
@@ -128,6 +131,14 @@ func (r *Routed) attempt(w http.ResponseWriter, req *http.Request, body io.Reade
 		return resp.StatusCode, true
 	}
 
+	if r.TapHeaders != nil {
+		r.TapHeaders(cred.AccountID, resp.Header)
+	}
+	stream := io.Reader(resp.Body)
+	if r.TeeBody != nil {
+		stream = r.TeeBody(cred.AccountID, resp.Body)
+	}
+
 	header := w.Header()
 	copyHeaders(header, resp.Header)
 	stripHopByHop(header, resp.Header.Get("Connection"))
@@ -136,7 +147,7 @@ func (r *Routed) attempt(w http.ResponseWriter, req *http.Request, body io.Reade
 	flusher, canFlush := w.(http.Flusher)
 	buf := make([]byte, r.MaxInFlight)
 	for {
-		n, readErr := resp.Body.Read(buf)
+		n, readErr := stream.Read(buf)
 		if n > 0 {
 			if _, werr := w.Write(buf[:n]); werr != nil {
 				return resp.StatusCode, false

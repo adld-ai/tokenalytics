@@ -80,6 +80,17 @@ CREATE TABLE IF NOT EXISTS routing (
     pinned_account INTEGER,
     updated_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS quota_windows (
+    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    window_kind TEXT NOT NULL,
+    used_pct REAL,
+    reset_at REAL,
+    window_s INTEGER,
+    label TEXT,
+    source TEXT,
+    updated_at REAL NOT NULL,
+    PRIMARY KEY(account_id, window_kind)
+);
 `
 
 // WriteOp is one unit of serialized mutation. It runs inside a
@@ -95,9 +106,13 @@ type writeReq struct {
 // through Read or the raw handle for queries.
 type Store struct {
 	db     *sql.DB
+	path   string
 	writes chan writeReq
 	done   chan struct{}
 }
+
+// Path returns the DB file path.
+func (s *Store) Path() string { return s.path }
 
 func dsn(path string) string {
 	return fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)", path)
@@ -139,6 +154,7 @@ func open(path string) (*Store, error) {
 		return nil, err
 	}
 	s := &Store{db: db, writes: make(chan writeReq, 256), done: make(chan struct{})}
+	s.path = path
 	go s.writer()
 	return s, nil
 }

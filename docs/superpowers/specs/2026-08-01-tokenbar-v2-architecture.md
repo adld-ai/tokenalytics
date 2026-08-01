@@ -710,14 +710,14 @@ side task:
 | No-cloak guarantee | S18 | v1 clean except documented login exception | held | standing rule |
 | Continuity-aware failover | S19 | `core/internal/relay/routed.go` (test-covered) | done (M1) | M1 |
 | Heartbeat removal | S20 | daemon retired 2026-08-01 (Phase P) | done | **immediate v1 patch** |
-| Refresh-on-use | S21 | scheduled fleet refresh | violated | M2 |
-| Human-shaped idle poll | S22 | 5-min metronome | violated | M2 |
+| Refresh-on-use | S21 | `core/internal/auth` (singleflight, 80% TTL) | done (M2) | M2 |
+| Human-shaped idle poll | S22 | `core/internal/idlepoll` (≥15 min, ±20% jitter, serialized) | done (M2) | M2 |
 | Per-provider modes | S23 | none | missing | M3 |
 | Pin-based switching | S24, S9 | `core/internal/routing` (pin default) | done (M1) | M1 |
 | Observer-mode retreat | S25 | v1 *is* observer mode | exists de facto | M3 formalize |
 | Human-paced management | S26 | CLI is serial | compliant | keep |
 | Management API + SSE | §5.5 | REST + bearer done (M1); SSE pending | partial | M3 |
-| Keychain at rest | S16 | plaintext SQLite | missing | M2 |
+| Keychain at rest | S16 | `core/internal/vault` (login keychain, DB refs only) | done (M2) | M2 |
 | `TOKENBAR_HOME` single dir | §6 | 5 env vars, 2 data dirs | violated | M4 + §15.3 cleanup |
 | App-generated launchd plist | Q1 | hand-written, one broken | broken | M4 |
 | Resource budgets + health | §12 | unmeasured (v1 ~180 MB total) | n/a | M3 acceptance |

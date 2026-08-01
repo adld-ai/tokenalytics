@@ -15,25 +15,30 @@ import (
 	"path/filepath"
 
 	"tokenbar/internal/api"
+	"tokenbar/internal/auth"
+	"tokenbar/internal/harvest"
+	"tokenbar/internal/idlepoll"
 	"tokenbar/internal/pool"
 	"tokenbar/internal/relay"
 	"tokenbar/internal/routing"
 	"tokenbar/internal/state"
+	"tokenbar/internal/vault"
 )
 
 // credSource adapts pool+routing to relay.CredentialSource.
 type credSource struct {
-	pool     *pool.Pool
-	router   *routing.Router
-	provider string
+	pool      *pool.Pool
+	router    *routing.Router
+	provider  string
+	refresher *auth.Refresher
 }
 
 func (c *credSource) build(id int64) (relay.RoutedCred, error) {
-	ts, err := c.pool.Tokens(id)
+	tok, err := c.refresher.TokenFor(context.Background(), id)
 	if err != nil {
 		return relay.RoutedCred{}, err
 	}
-	cred := relay.RoutedCred{AccountID: id, Token: ts.AccessToken}
+	cred := relay.RoutedCred{AccountID: id, Token: tok}
 	if c.provider == "codex" {
 		if a, err := c.pool.Get(id); err == nil && a.AccountID != "" {
 			// S17: replace the provider account-id header that pairs
@@ -101,6 +106,8 @@ func main() {
 	importV1 := flag.String("import-v1", "", "import a v1 pool.db and exit")
 	importCliproxy := flag.String("import-cliproxy", "", "import a cliproxy auth dir and exit")
 	dryRun := flag.Bool("dry-run", true, "print the identity mapping without writing")
+	useKeychain := flag.Bool("keychain", true, "seal tokens in macOS Keychain (S16)")
+	migrateKeychain := flag.Bool("migrate-keychain", false, "re-seal all plaintext token rows into the keychain and exit")
 	flag.Parse()
 
 	if *dbPath == "" {
@@ -122,7 +129,21 @@ func main() {
 		log.Fatal(err)
 	}
 	defer st.Close()
-	p := pool.New(st, pool.PlainVault{})
+	var v pool.Vault = pool.PlainVault{}
+	if *useKeychain {
+		v = vault.NewKeychain()
+	}
+	p := pool.New(st, v)
+
+	if *migrateKeychain {
+		kv := vault.NewKeychain()
+		n, err := p.MigrateToVault(kv)
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Printf("migrated %d token rows to keychain\n", n)
+		return
+	}
 
 	if *importV1 != "" {
 		n, err := p.ImportV1DB(*importV1, *dryRun, os.Stdout)
@@ -158,10 +179,29 @@ func main() {
 	srv := api.New(p, r, tok)
 	srv.RebuildRoutes()
 
-	src := &credSource{pool: p, router: r, provider: *provider}
+	engine := harvest.NewEngine(st)
+	srv.Engine = engine
+	srv.FlowRunner = &flowRunner{configs: auth.FlowConfigs}
+
+	refresher := auth.NewRefresher(p)
+	src := &credSource{pool: p, router: r, provider: *provider, refresher: refresher}
+
+	probers := map[string]idlepoll.Prober{
+		"codex": &idlepoll.CodexProbe{Pool: p, Refresher: refresher},
+	}
+	sched := idlepoll.New(p, engine, probers, nil)
+	go sched.Run(context.Background())
+
 	mux := http.NewServeMux()
 	mux.Handle("/api/", srv.Mux)
-	mux.Handle("/", relay.NewRouted(up, *stripPrefix, src))
+	routed := relay.NewRouted(up, *stripPrefix, src)
+	routed.TapHeaders = func(accountID int64, h http.Header) {
+		obs := harvest.FromHeaders(accountID, h)
+		if len(obs.Windows) > 0 {
+			engine.Observe(obs)
+		}
+	}
+	mux.Handle("/", routed)
 
 	addr := fmt.Sprintf("127.0.0.1:%d", *port)
 	log.Printf("tokenbar-core: relay+api on %s -> %s (provider %s)", addr, up, *provider)
