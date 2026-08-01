@@ -640,6 +640,44 @@ exists — the v1 codebase, and this machine's running state.
 
 ### 15.3 Machine/operations state divergences
 
+**Resolved 2026-08-01 (Phase P).** The inventory below was executed;
+findings and dispositions:
+
+1. **Who writes what (was "undetermined").** The poller
+   (`com.tonye.agentpool-poller`) and heartbeat processes were started
+   2026-07-22 from `~/solo/token-status-bar/backend/pool.py`. That
+   directory was later renamed to `~/solo/token-bar`, so the plist
+   paths dangle, but the processes survived on deleted code with their
+   DB file descriptors pointing — by inode — at the **repo**
+   `secrets/pool.db` (52 MB, 9 accounts). The poller regenerated
+   `~/solo/token-status-bar/secrets/status.json` every 5 min from that
+   repo DB (its `AGENT_POOL_STATUS_JSON` still named the old path).
+   The shadow `pool.db` there (4 KB) is opened only by the app's
+   bundled server (`pool.py server`, port 7817). Cloud push
+   (PID from `com.tonye.tokenbar-cloudpush`) read the shadow
+   status.json.
+2. **Canonical v1 data dir: repo `secrets/`.** It holds the only real
+   DB. The shadow dir remains the menu app's read rendezvous
+   (status.json + history) until M3 replaces file polling with the
+   API; no process may treat the shadow `pool.db` as data.
+3. **Retired plists (2026-08-01):** `com.tonye.agentpool-heartbeat`
+   (booted out + plist removed — S20: the 5-hourly "hi" traffic is
+   permanently off) and `com.tonye.tokenbar-cloudpush` (booted out +
+   plist removed — Q2). Both preserved in
+   `secrets/recovery/2026-08-01/`.
+4. **Poller plist repaired in place:** ProgramArguments now point at
+   `~/solo/token-bar/backend/pool.py poll-loop` with
+   `AGENT_POOL_DB=~/solo/token-bar/secrets/pool.db` and
+   `AGENT_POOL_STATUS_JSON=~/solo/token-status-bar/secrets/status.json`
+   (preserving the menu rendezvous). Verified: fresh status.json with
+   9 accounts within one poll cycle. The old deleted-code process was
+   booted out.
+5. **Backups (P5):** WAL-checkpointed `pool.db`, repo + shadow
+   status.json, and all three plists (plus `.bak-pre-live` copies)
+   archived in `secrets/recovery/2026-08-01/`.
+
+Original pre-cleanup observations (kept for the record):
+
 Reality on this machine does not match the clean slate the migration
 phases assume. Inventory and cleanup is a **prerequisite to M1**, not a
 side task:
@@ -671,7 +709,7 @@ side task:
 | Verbatim headers / no XFF | S17 | none (v1 poller uses own UA) | missing | M0 |
 | No-cloak guarantee | S18 | v1 clean except documented login exception | held | standing rule |
 | Continuity-aware failover | S19 | n/a (no proxy) | missing | M1 |
-| Heartbeat removal | S20 | daemon live | violated | **immediate v1 patch** |
+| Heartbeat removal | S20 | daemon retired 2026-08-01 (Phase P) | done | **immediate v1 patch** |
 | Refresh-on-use | S21 | scheduled fleet refresh | violated | M2 |
 | Human-shaped idle poll | S22 | 5-min metronome | violated | M2 |
 | Per-provider modes | S23 | none | missing | M3 |
