@@ -705,8 +705,8 @@ side task:
 | Spec element | Clause | Current artifact | Status | Lands in |
 |---|---|---|---|---|
 | Single-writer core | §2, §13 | none | missing | M1 |
-| Byte-verbatim relay | S1–S6 | none | missing | M0 |
-| Verbatim headers / no XFF | S17 | none (v1 poller uses own UA) | missing | M0 |
+| Byte-verbatim relay | S1–S6 | `core/internal/relay` | done (M0) | M0 |
+| Verbatim headers / no XFF | S17 | `core/internal/relay` (test-covered) | done (M0) | M0 |
 | No-cloak guarantee | S18 | v1 clean except documented login exception | held | standing rule |
 | Continuity-aware failover | S19 | n/a (no proxy) | missing | M1 |
 | Heartbeat removal | S20 | daemon retired 2026-08-01 (Phase P) | done | **immediate v1 patch** |
@@ -894,6 +894,20 @@ affect a user's CLI — and it is intentionally dumb.
 | TokenStatusBar.app (Swift, v1 UI) | 78 MB | ~0% | 46 min |
 | v1 bundled python server | 43 MB | ~0% | 46 min |
 | v1 total (app + server + poller + heartbeat) | ~180 MB across 4 processes | | |
+
+**M0 relay measurements (2026-08-01, `tokenbar-core` M0 spike):**
+
+| State | RSS | CPU | vs §12.2 budget |
+|---|---|---|---|
+| Idle | 10.5 MB | 0.0% | 17% of the 60 MB idle budget (83% headroom) |
+| After 100 sequential streams (mixed streaming / non-streaming / abort-mid-stream) | 12.4 MB | 0.0% | 8% of the 150 MB p95 budget (92% headroom) |
+
+Byte-diff direct-vs-proxied clean (hop-by-hop + Date excluded
+explicitly); goleak clean on the streaming suite; live codex CLI turn
+completed through the relay. One deviation found: codex CLI 0.146
+attempts a WebSocket transport first; the dumb pipe answers 405 and
+the CLI falls back to HTTP SSE after ~10 s of retries. HTTP SSE is
+the relay's contract; the WS path is out of scope for v2 (S1).
 
 The 15-day-flat Go proxy is the strongest evidence the v2 shape can run
 leak-free; bun's 278 MB is why the core is Go, not a JS service.
