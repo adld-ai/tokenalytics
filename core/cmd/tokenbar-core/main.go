@@ -1,65 +1,91 @@
-// tokenbar-core is the TokenBar v2 single-writer core. Phase M0 ships
-// only the byte-verbatim relay with one configured credential; pool,
-// routing, and the management API land in M1+.
+// tokenbar-core is the TokenBar v2 single-writer core. M1: pool,
+// routing, and the management API are live behind the M0 relay.
 package main
 
 import (
-	"encoding/json"
+	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
-	"strings"
-	"sync/atomic"
+	"path/filepath"
 
+	"tokenbar/internal/api"
+	"tokenbar/internal/pool"
 	"tokenbar/internal/relay"
+	"tokenbar/internal/routing"
+	"tokenbar/internal/state"
 )
 
-// tokenSource reloads the credential lazily from disk so a refreshed
-// token file is honored without a restart. M0 accepts either a raw
-// bearer string or a codex auth.json document.
-type tokenSource struct {
-	path string
-	cur  atomic.Value
+// credSource adapts pool+routing to relay.CredentialSource.
+type credSource struct {
+	pool     *pool.Pool
+	router   *routing.Router
+	provider string
 }
 
-func (t *tokenSource) load() (string, error) {
-	raw, err := os.ReadFile(t.path)
+func (c *credSource) build(id int64) (relay.RoutedCred, error) {
+	ts, err := c.pool.Tokens(id)
 	if err != nil {
+		return relay.RoutedCred{}, err
+	}
+	cred := relay.RoutedCred{AccountID: id, Token: ts.AccessToken}
+	if c.provider == "codex" {
+		if a, err := c.pool.Get(id); err == nil && a.AccountID != "" {
+			// S17: replace the provider account-id header that pairs
+			// with the token.
+			cred.PairName = "ChatGPT-Account-Id"
+			cred.PairValue = a.AccountID
+		}
+	}
+	return cred, nil
+}
+
+func (c *credSource) Pick(ctx context.Context) (relay.RoutedCred, error) {
+	pick, err := c.router.Pick(c.provider)
+	if err != nil {
+		return relay.RoutedCred{}, err
+	}
+	return c.build(pick.AccountID)
+}
+
+func (c *credSource) Next(ctx context.Context, prev relay.RoutedCred) (relay.RoutedCred, error) {
+	pick, err := c.router.NextAfter(c.provider, prev.AccountID)
+	if err != nil {
+		return relay.RoutedCred{}, err
+	}
+	return c.build(pick.AccountID)
+}
+
+func (c *credSource) ReportHardFailure(prev relay.RoutedCred, status int) {
+	c.router.Cooldown(prev.AccountID, fmt.Sprintf("upstream %d", status), 0)
+}
+
+func (c *credSource) FailoverAllowed() bool {
+	ri, ok := c.router.Routes()[c.provider]
+	return ok && ri.Policy == routing.PolicyFillFirst
+}
+
+func adminToken(path string) (string, error) {
+	if raw, err := os.ReadFile(path); err == nil && len(raw) > 0 {
+		return string(raw[:len(raw)-1]), nil // trailing newline
+	}
+	buf := make([]byte, 24)
+	if _, err := rand.Read(buf); err != nil {
 		return "", err
 	}
-	s := strings.TrimSpace(string(raw))
-	if strings.HasPrefix(s, "{") {
-		var doc struct {
-			APIKey string `json:"OPENAI_API_KEY"`
-			Tokens struct {
-				AccessToken string `json:"access_token"`
-			} `json:"tokens"`
-		}
-		if err := json.Unmarshal([]byte(s), &doc); err != nil {
-			return "", err
-		}
-		if doc.Tokens.AccessToken != "" {
-			return doc.Tokens.AccessToken, nil
-		}
-		return doc.APIKey, nil
+	tok := hex.EncodeToString(buf)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return "", err
 	}
-	return s, nil
-}
-
-func (t *tokenSource) get() string {
-	if v, ok := t.cur.Load().(string); ok && v != "" {
-		return v
+	if err := os.WriteFile(path, []byte(tok+"\n"), 0o600); err != nil {
+		return "", err
 	}
-	s, err := t.load()
-	if err != nil {
-		log.Printf("tokenbar-core: token load: %v", err)
-		return ""
-	}
-	t.cur.Store(s)
-	return s
+	return tok, nil
 }
 
 func main() {
@@ -68,36 +94,76 @@ func main() {
 		"fixed upstream base URL (dial allowlist)")
 	stripPrefix := flag.String("strip-prefix", "/v1",
 		"path prefix removed before joining to the upstream base")
-	tokenFile := flag.String("token-file", "", "raw bearer token or codex auth.json path")
+	provider := flag.String("provider", "codex", "provider routed on the strip-prefix surface")
+	dbPath := flag.String("db", "", "v2 SQLite DB path (e.g. ~/.tokenbar/pool.db)")
+	adminTokenFile := flag.String("admin-token-file", "", "management bearer token file (0600)")
+	initDB := flag.Bool("init", false, "create a fresh DB at -db and exit")
+	importV1 := flag.String("import-v1", "", "import a v1 pool.db and exit")
+	importCliproxy := flag.String("import-cliproxy", "", "import a cliproxy auth dir and exit")
+	dryRun := flag.Bool("dry-run", true, "print the identity mapping without writing")
 	flag.Parse()
 
-	if *tokenFile == "" {
-		log.Fatal("tokenbar-core: -token-file is required")
+	if *dbPath == "" {
+		log.Fatal("tokenbar-core: -db is required")
 	}
+
+	if *initDB {
+		st, err := state.Init(*dbPath)
+		if err != nil {
+			log.Fatal(err)
+		}
+		st.Close()
+		fmt.Println("initialized", *dbPath)
+		return
+	}
+
+	st, err := state.Open(*dbPath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer st.Close()
+	p := pool.New(st, pool.PlainVault{})
+
+	if *importV1 != "" {
+		n, err := p.ImportV1DB(*importV1, *dryRun, os.Stdout)
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Printf("imported %d accounts (dry-run=%v)\n", n, *dryRun)
+		return
+	}
+	if *importCliproxy != "" {
+		n, err := p.ImportCliproxyDir(*importCliproxy, *dryRun, os.Stdout)
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Printf("imported %d accounts (dry-run=%v)\n", n, *dryRun)
+		return
+	}
+
+	if *adminTokenFile == "" {
+		log.Fatal("tokenbar-core: -admin-token-file is required to serve")
+	}
+	tok, err := adminToken(*adminTokenFile)
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	up, err := url.Parse(*upstream)
 	if err != nil || up.Scheme == "" || up.Host == "" {
 		log.Fatalf("tokenbar-core: bad -upstream %q", *upstream)
 	}
 
-	tok := &tokenSource{path: *tokenFile}
-	if tok.get() == "" {
-		log.Fatalf("tokenbar-core: no token readable from %s", *tokenFile)
-	}
+	r := routing.New()
+	srv := api.New(p, r, tok)
+	srv.RebuildRoutes()
 
-	r := relay.New(relay.Config{
-		Upstream:    up,
-		StripPrefix: *stripPrefix,
-		Token:       tok.get,
-	})
-
+	src := &credSource{pool: p, router: r, provider: *provider}
 	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprintln(w, `{"ok":true}`)
-	})
-	mux.Handle("/", r)
+	mux.Handle("/api/", srv.Mux)
+	mux.Handle("/", relay.NewRouted(up, *stripPrefix, src))
 
 	addr := fmt.Sprintf("127.0.0.1:%d", *port)
-	log.Printf("tokenbar-core: relay on %s -> %s", addr, up)
+	log.Printf("tokenbar-core: relay+api on %s -> %s (provider %s)", addr, up, *provider)
 	log.Fatal(http.ListenAndServe(addr, mux))
 }
