@@ -249,12 +249,16 @@ def cmd_remove(account_id):
     if not a:
         print(f"Account {account_id} not found")
         return 1
-    store.delete_account(DB, int(account_id))
-    try:
-        import status
-        status.cmd_export(DB)
-    except Exception as e:
-        print(f"  export-status failed: {e}")
+    # Serialize with the poll daemon: without the lock a daemon holding a
+    # stale account list can rewrite status.json right after our export and
+    # resurrect the removed account in the menu bar.
+    with work_queue.exclusive("poll"):
+        store.delete_account(DB, int(account_id))
+        try:
+            import status
+            status.cmd_export(DB)
+        except Exception as e:
+            print(f"  export-status failed: {e}")
     print(f"Removed: {a['provider']} / {a['email']}")
     return 0
 

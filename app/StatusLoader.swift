@@ -178,6 +178,7 @@ class StatusLoader: ObservableObject {
         var env = ProcessInfo.processInfo.environment
         if env["AGENT_POOL_DB"] == nil { env["AGENT_POOL_DB"] = "\(dataDir)/pool.db" }
         if env["AGENT_POOL_STATUS_JSON"] == nil { env["AGENT_POOL_STATUS_JSON"] = "\(dataDir)/status.json" }
+        if env["AGENT_POOL_HISTORY_DIR"] == nil { env["AGENT_POOL_HISTORY_DIR"] = "\(poolDir)/history" }
         let p = Process()
         p.environment = env
         if let py = bundledPython, let pool = bundledPoolPy {
@@ -193,7 +194,7 @@ class StatusLoader: ObservableObject {
     /// Shell command string for running `pool.py <args>` (for Terminal-based flows).
     func poolShellCommand(_ args: [String]) -> String {
         let q = StatusLoader.shellQuote
-        let envPrefix = "AGENT_POOL_DB=\(q("\(dataDir)/pool.db")) AGENT_POOL_STATUS_JSON=\(q("\(dataDir)/status.json"))"
+        let envPrefix = "AGENT_POOL_DB=\(q("\(dataDir)/pool.db")) AGENT_POOL_STATUS_JSON=\(q("\(dataDir)/status.json")) AGENT_POOL_HISTORY_DIR=\(q("\(poolDir)/history"))"
         let quotedArgs = args.map(q).joined(separator: " ")
         if let py = bundledPython, let pool = bundledPoolPy {
             return "\(envPrefix) \(q(py)) \(q(pool)) \(quotedArgs)"
