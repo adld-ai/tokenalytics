@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tokenalytics — Classroom view</title>
+<style>
+/* Classroom view: one tile per account, for an instructor's wall screen. Reads status.json; no build, no network except ?src. */
+:root{--bg:#0e1013;--tile:#171a1f;--fg:#e9ecef;--mute:#8b94a0;--line:#262b32;--ok:#3fb67a;--warn:#e0a84a;--bad:#e05d5d;--stale:#5d6570;color-scheme:dark}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.4 -apple-system,"Segoe UI","Apple SD Gothic Neo","Noto Sans KR",sans-serif;display:flex;flex-direction:column}
+header{display:flex;flex-wrap:wrap;gap:6px 20px;align-items:baseline;padding:10px 16px;border-bottom:1px solid var(--line)}
+header h1{font-size:15px;font-weight:600;margin:0}
+header .age,header .headline,header .swap{color:var(--mute);font-variant-numeric:tabular-nums}
+header .headline b{color:var(--fg);font-weight:500}
+header .err{color:var(--bad)}
+main{flex:1;display:grid;gap:8px;padding:8px 16px 12px;align-content:start;overflow:auto}
+main[data-n="s"]{grid-template-columns:repeat(4,1fr);grid-auto-rows:minmax(130px,1fr)}
+main[data-n="m"]{grid-template-columns:repeat(4,1fr);grid-auto-rows:minmax(120px,1fr)}
+main[data-n="l"]{grid-template-columns:repeat(6,1fr);grid-auto-rows:minmax(104px,1fr)}
+main[data-n="xl"]{grid-template-columns:repeat(8,1fr);grid-auto-rows:minmax(92px,1fr)}
+.tile{background:var(--tile);border:1px solid var(--line);border-radius:6px;padding:10px 12px;display:grid;grid-template-rows:auto 1fr auto;gap:2px;position:relative;min-width:0}
+.tile[data-sev="warning"]{border-color:var(--warn)}
+.tile[data-sev="exhausted"]{border-color:var(--bad);background:color-mix(in srgb,var(--bad) 12%,var(--tile))}
+.tile[data-stale="1"]{border-left:6px solid var(--stale);color:var(--mute)}
+.tile .pct{font-size:clamp(22px,3.2vw,40px);font-weight:700;line-height:1;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.tile[data-sev="warning"] .pct{color:var(--warn)}.tile[data-sev="exhausted"] .pct{color:var(--bad)}.tile[data-sev="normal"] .pct{color:var(--ok)}
+.tile[data-stale="1"] .pct{color:var(--stale)}
+.tile .who{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tile .who small{color:var(--mute);margin-left:6px;text-transform:uppercase;font-size:10px;letter-spacing:.06em}
+.tile .when{font-size:12px;color:var(--mute);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile .when.proj{color:var(--bad);font-weight:600}
+.tile .dot{position:absolute;top:10px;right:10px;width:9px;height:9px;border-radius:50%;background:var(--ok)}
+.tile[data-sev="warning"] .dot{background:var(--warn)}.tile[data-sev="exhausted"] .dot{background:var(--bad)}.tile[data-stale="1"] .dot{background:var(--stale)}
+.empty{grid-column:1/-1;color:var(--mute);padding:40px;text-align:center}
+footer{padding:6px 16px;color:var(--mute);font-size:12px;border-top:1px solid var(--line);display:flex;gap:16px;flex-wrap:wrap}
+footer kbd{border:1px solid var(--line);border-radius:3px;padding:0 5px;font-family:inherit}
+@media (max-width:700px){main[data-n]{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Classroom view</h1>
+  <span class="age" id="age">loading…</span>
+  <span id="count"></span>
+  <span class="headline" id="headline"></span>
+  <span class="swap" id="swap"></span>
+  <span class="err" id="err" hidden></span>
+</header>
+<main id="grid" data-n="l"></main>
+<footer><span>source: <code id="src"></code></span><span>reload 15 s</span><span><kbd>f</kbd> fullscreen</span><span>names masked (<code>?unmask=1</code> to show)</span></footer>
+<script>
+/* exported for tests; no side effects at import time when window.__CLASSROOM_TEST is set */
+(function (root) {
+  function worstWindow(acc) {
+    var ws = (acc && acc.windows) || [];
+    if (!ws.length) return null;
+    var best = null;
+    ws.forEach(function (w) {
+      var k = sortKeyWindow(w);
+      if (!best || cmp(k, sortKeyWindow(best)) < 0) best = w;
+    });
+    return best;
+  }
+  function used(w) {
+    if (!w) return null;
+    var u = (w.used_pct_effective != null) ? w.used_pct_effective : w.used_pct;
+    return (u == null || isNaN(u)) ? null : Number(u);
+  }
+  function sortKeyWindow(w) {
+    // lower sorts first: exhausted, then projected exhaust soonest, then highest used
+    var sev = (w.severity || "normal");
+    var s0 = sev === "exhausted" ? 0 : 1;
+    var proj = w.projected_exhaust_epoch ? Number(w.projected_exhaust_epoch) : Infinity;
+    var u = used(w); if (u == null) u = -1;
+    return [s0, proj, -u];
+  }
+  function sortKeyAccount(acc) {
+    var w = worstWindow(acc);
+    if (!w) return [2, Infinity, 1];
+    return sortKeyWindow(w);
+  }
+  function cmp(a, b) { for (var i = 0; i < a.length; i++) { if (a[i] < b[i]) return -1; if (a[i] > b[i]) return 1; } return 0; }
+  function sortAccounts(list) { return list.slice().sort(function (a, b) { return cmp(sortKeyAccount(a), sortKeyAccount(b)); }); }
+  function mask(email) {
+    if (!email) return "";
+    var i = email.indexOf("@"); if (i < 0) return email.slice(0, 2) + "***";
+    var local = email.slice(0, i), dom = email.slice(i);
+    return local.slice(0, 2) + "***" + dom;
+  }
+  function fmtDelta(sec) {
+    if (sec == null || !isFinite(sec)) return "—";
+    if (sec < 0) sec = 0;
+    var h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = Math.floor(sec % 60);
+    return h > 0 ? h + "h " + String(m).padStart(2, "0") + "m" : m + ":" + String(s).padStart(2, "0");
+  }
+  function gridSize(n) { return n <= 8 ? "s" : n <= 16 ? "m" : n <= 30 ? "l" : "xl"; }
+  var api = { worstWindow: worstWindow, used: used, sortAccounts: sortAccounts, mask: mask, fmtDelta: fmtDelta, gridSize: gridSize, sortKeyAccount: sortKeyAccount };
+  if (typeof module !== "undefined" && module.exports) module.exports = api;
+  if (typeof root !== "undefined") root.Classroom = api;
+})(typeof window !== "undefined" ? window : undefined);
+
+(function () {
+  if (typeof window === "undefined" || window.__CLASSROOM_TEST) return;
+  var C = window.Classroom, q = new URLSearchParams(location.search);
+  var src = q.get("src") || "../secrets/status.json", unmask = q.get("unmask") === "1";
+  var $ = function (id) { return document.getElementById(id); };
+  $("src").textContent = src;
+  function render(d) {
+    var now = Date.now() / 1000;
+    var gen = d.generated_at ? Date.parse(d.generated_at) / 1000 : null;
+    $("age").textContent = gen ? "updated " + Math.max(0, Math.round(now - gen)) + " s ago" : "updated —";
+    $("count").textContent = (d.account_count != null ? d.account_count : (d.accounts || []).length) + " accounts";
+    var h = d.headline;
+    $("headline").innerHTML = h ? "headline: <b>" + esc(h.provider || "") + " " + esc(unmask ? (h.email || "") : C.mask(h.email)) + "</b> " + esc(h.label || h.kind || "") + " " + (h.used_pct != null ? Math.round(h.used_pct) + "%" : "") : "";
+    var sw = d.last_swap;
+    $("swap").textContent = sw ? "last swap: " + (sw.provider || "") + " " + (sw.from || "") + " → " + (sw.to || "") : "";
+    var list = C.sortAccounts(d.accounts || []);
+    var g = $("grid"); g.setAttribute("data-n", C.gridSize(list.length)); g.innerHTML = "";
+    if (!list.length) { g.innerHTML = '<div class="empty">No accounts in ' + esc(src) + '</div>'; return; }
+    list.forEach(function (a) {
+      var w = C.worstWindow(a), u = C.used(w);
+      var sev = w ? (w.severity || "normal") : "normal";
+      if (a.state && a.state.quota === "exhausted") sev = "exhausted";
+      var stale = w && w.stale ? "1" : "0";
+      var t = document.createElement("div");
+      t.className = "tile"; t.setAttribute("data-sev", sev); t.setAttribute("data-stale", stale);
+      var when = "", proj = false;
+      if (w) {
+        var reset = w.reset_at_epoch ? Number(w.reset_at_epoch) - now : null;
+        if (w.projected_exhaust_epoch && (reset == null || Number(w.projected_exhaust_epoch) < Number(w.reset_at_epoch))) {
+          when = "⚠ exhausts in " + C.fmtDelta(Number(w.projected_exhaust_epoch) - now); proj = true;
+        } else when = (w.label || w.kind || "") + " · resets in " + C.fmtDelta(reset);
+        if (w.stale) when += " · stale";
+      }
+      t.innerHTML = '<span class="dot"></span>' +
+        '<div class="pct">' + (u == null ? "—" : Math.round(u) + "%") + '</div>' +
+        '<div class="who">' + esc(a.label || "") + '<small>' + esc(a.provider || "") + ' · ' + esc(a.plan || "") + '</small><br>' + esc(unmask ? (a.email || "") : C.mask(a.email)) + '</div>' +
+        '<div class="when' + (proj ? " proj" : "") + '">' + esc(when) + '</div>';
+      g.appendChild(t);
+    });
+  }
+  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+  function load() {
+    fetch(src, { cache: "no-store" }).then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+      .then(function (d) { $("err").hidden = true; render(d); })
+      .catch(function (e) { $("err").hidden = false; $("err").textContent = "cannot read " + src + " — " + e.message; });
+  }
+  load(); setInterval(load, 15000);
+  document.addEventListener("keydown", function (e) { if (e.key === "f" && document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(function () {}); });
+})();
+</script>
+</body>
+</html>
