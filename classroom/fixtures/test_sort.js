@@ -16,4 +16,21 @@ assert.strictEqual(C.gridSize(30),'l');assert.strictEqual(C.gridSize(16),'m');as
 assert.strictEqual(C.used({used_pct:50,used_pct_effective:0}),0,'effective wins');
 assert.strictEqual(C.used({used_pct:50}),50);
 assert.strictEqual(C.fmtDelta(3725),'1h 02m');assert.strictEqual(C.fmtDelta(125),'2:05');
-console.log('test_sort: OK (',s.length,'accounts)');
+// producer-compatible case (Codex finding 2026-10-09): rate_limited severity at 97% must beat a low-usage projected tile
+const synth=[
+ {id:'low_projected',provider:'codex',email:'a@x',label:'a',plan:'Pro',state:{auth:'ok',subscription:'paid',quota:'ok',usable:true},
+  windows:[{kind:'session',label:'5h',used_pct:20,used_pct_effective:20,reset_at_epoch:9e9,severity:'normal',phase:'live',stale:false,projected_exhaust_epoch:1e9}]},
+ {id:'exhausted_real',provider:'claude',email:'b@x',label:'b',plan:'Max',state:{auth:'ok',subscription:'paid',quota:'exhausted',usable:false},
+  windows:[{kind:'session',label:'5h',used_pct:97,used_pct_effective:97,reset_at_epoch:9e9,severity:'rate_limited',phase:'live',stale:false}]},
+ {id:'over100',provider:'xai',email:'c@x',label:'c',plan:'S',state:{auth:'ok',subscription:'paid',quota:'ok',usable:true},
+  windows:[{kind:'daily',label:'Daily',used_pct:100,used_pct_effective:100,reset_at_epoch:9e9,severity:'normal',phase:'live',stale:false}]},
+ {id:'status_only',provider:'devin',email:'d@x',label:'d',plan:'Core',state:{auth:'ok',subscription:'paid',quota:'exhausted',usable:false},
+  windows:[{kind:'weekly',label:'ACUs',used_pct:40,used_pct_effective:40,reset_at_epoch:9e9,severity:'normal',phase:'live',stale:false}]}
+];
+const o=C.sortAccounts(synth).map(a=>a.id);
+assert.ok(o.indexOf('low_projected')>o.indexOf('exhausted_real'),'rate_limited beats projected: '+o);
+assert.ok(o.indexOf('low_projected')>o.indexOf('over100'),'used>=100 beats projected: '+o);
+assert.ok(o.indexOf('low_projected')>o.indexOf('status_only'),'state.quota exhausted beats projected: '+o);
+assert.strictEqual(C.isExhausted({severity:'exceeded',used_pct:5}),true);
+assert.strictEqual(C.isExhausted({severity:'normal',used_pct:99.9}),false);
+console.log('test_sort: OK (',s.length,'accounts + 4 synthetic)');

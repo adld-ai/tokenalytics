@@ -68,18 +68,26 @@ footer kbd{border:1px solid var(--line);border-radius:3px;padding:0 5px;font-fam
     var u = (w.used_pct_effective != null) ? w.used_pct_effective : w.used_pct;
     return (u == null || isNaN(u)) ? null : Number(u);
   }
+  function isExhausted(w) {
+    // mirrors backend/status.py account_state()._exhausted: used >= 100 or severity rate_limited/exceeded
+    if (!w) return false;
+    var sev = String(w.severity || "normal").toLowerCase(), u = used(w);
+    return sev === "exhausted" || sev === "rate_limited" || sev === "exceeded" || (u != null && u >= 100);
+  }
   function sortKeyWindow(w) {
     // lower sorts first: exhausted, then projected exhaust soonest, then highest used
-    var sev = (w.severity || "normal");
-    var s0 = sev === "exhausted" ? 0 : 1;
+    var s0 = isExhausted(w) ? 0 : 1;
     var proj = w.projected_exhaust_epoch ? Number(w.projected_exhaust_epoch) : Infinity;
     var u = used(w); if (u == null) u = -1;
     return [s0, proj, -u];
   }
   function sortKeyAccount(acc) {
     var w = worstWindow(acc);
-    if (!w) return [2, Infinity, 1];
-    return sortKeyWindow(w);
+    if (!w) return [(acc && acc.state && acc.state.quota === "exhausted") ? 0 : 2, Infinity, 1];
+    var k = sortKeyWindow(w);
+    // the producer's own verdict wins: state.quota == "exhausted" (incl. status == rate_limited) sorts first
+    if (acc && acc.state && acc.state.quota === "exhausted") k = [0, k[1], k[2]];
+    return k;
   }
   function cmp(a, b) { for (var i = 0; i < a.length; i++) { if (a[i] < b[i]) return -1; if (a[i] > b[i]) return 1; } return 0; }
   function sortAccounts(list) { return list.slice().sort(function (a, b) { return cmp(sortKeyAccount(a), sortKeyAccount(b)); }); }
@@ -96,7 +104,7 @@ footer kbd{border:1px solid var(--line);border-radius:3px;padding:0 5px;font-fam
     return h > 0 ? h + "h " + String(m).padStart(2, "0") + "m" : m + ":" + String(s).padStart(2, "0");
   }
   function gridSize(n) { return n <= 8 ? "s" : n <= 16 ? "m" : n <= 30 ? "l" : "xl"; }
-  var api = { worstWindow: worstWindow, used: used, sortAccounts: sortAccounts, mask: mask, fmtDelta: fmtDelta, gridSize: gridSize, sortKeyAccount: sortKeyAccount };
+  var api = { isExhausted: isExhausted, worstWindow: worstWindow, used: used, sortAccounts: sortAccounts, mask: mask, fmtDelta: fmtDelta, gridSize: gridSize, sortKeyAccount: sortKeyAccount };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   if (typeof root !== "undefined") root.Classroom = api;
 })(typeof window !== "undefined" ? window : undefined);
@@ -122,7 +130,8 @@ footer kbd{border:1px solid var(--line);border-radius:3px;padding:0 5px;font-fam
     list.forEach(function (a) {
       var w = C.worstWindow(a), u = C.used(w);
       var sev = w ? (w.severity || "normal") : "normal";
-      if (a.state && a.state.quota === "exhausted") sev = "exhausted";
+      if (C.isExhausted(w) || (a.state && a.state.quota === "exhausted")) sev = "exhausted";
+      else if (sev !== "warning" && sev !== "normal") sev = "warning";
       var stale = w && w.stale ? "1" : "0";
       var t = document.createElement("div");
       t.className = "tile"; t.setAttribute("data-sev", sev); t.setAttribute("data-stale", stale);
